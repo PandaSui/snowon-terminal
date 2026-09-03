@@ -19,7 +19,7 @@ function useEthPrice() {
     queryFn: async () => {
       const res = await fetch("/api/eth-price");
       const body = await readJson<EthPrice | { error?: string }>(res);
-      if (!res.ok || !("price" in body)) throw new Error("price unavailable");
+      if (!res.ok || !("price" in body) || !Number.isFinite(body.price)) throw new Error("price unavailable");
       return body;
     },
     refetchInterval: 15_000,
@@ -330,9 +330,11 @@ export function BottomBar() {
         <span style={{ display: "inline-flex", alignItems: "baseline", gap: 6 }}>
           <span style={{ color: "#5e6673" }}>ETH</span>
           <span style={{ fontWeight: 800, fontSize: 13, color: "#eaecef", fontVariantNumeric: "tabular-nums" }}>
-            {eth ? `$${eth.price.toLocaleString("en-US", { maximumFractionDigits: 2 })}` : "…"}
+            {eth && Number.isFinite(eth.price)
+              ? `$${eth.price.toLocaleString("en-US", { maximumFractionDigits: 2 })}`
+              : "…"}
           </span>
-          {eth && (
+          {eth && Number.isFinite(eth.change24hPct) && (
             <span style={{ fontWeight: 700, color: ethUp ? "#0ecb81" : "#f6465d", fontVariantNumeric: "tabular-nums" }}>
               {ethUp ? "▲" : "▼"} {Math.abs(eth.change24hPct).toFixed(2)}%
             </span>
