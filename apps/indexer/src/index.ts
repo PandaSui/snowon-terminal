@@ -272,39 +272,30 @@ async function runChain(cfg: ChainConfig, db: ReturnType<typeof createDb>, redis
     }
   }
 
-  client.watchEvent({
-    address: cfg.factory,
-    event: evCoinCreated,
-    fromBlock: head,
-    onLogs: (logs) => enqueue(() => handleLive(logs, "created")),
-  });
-  client.watchEvent({
-    event: evBuy,
-    fromBlock: head,
-    onLogs: (logs) => enqueue(() => handleLive(logs, "buy")),
-  });
-  client.watchEvent({
-    event: evSell,
-    fromBlock: head,
-    onLogs: (logs) => enqueue(() => handleLive(logs, "sell")),
-  });
-  client.watchEvent({
-    event: evGraduated,
-    fromBlock: head,
-    onLogs: (logs) => enqueue(() => handleLive(logs, "grad")),
-  });
-  client.watchEvent({
-    address: cfg.poolManager,
-    event: evSwap,
-    fromBlock: head,
-    onLogs: (logs) => enqueue(() => handleLive(logs, "swap")),
-  });
-  client.watchEvent({
-    address: cfg.poolManager,
-    event: evModifyLiq,
-    fromBlock: head,
-    onLogs: (logs) => enqueue(() => handleLive(logs, "liq")),
-  });
+  // 实时监听:自研轮询替代 watchEvent——
+  // 1) 该 RPC 不支持 eth_newFilter(viem 默认 filter 模式静默收不到事件);
+  // 2) watchEvent 轮询命中"日志超 1 万条"会卡死在同一区间,而 processRange
+  //    走 getLogsWithRetry 会自动对半拆分,且 Swap 按 poolId 过滤,量小。
+  let liveFrom = head + 1n;
+  let liveBusy = false;
+  async function liveTick() {
+    if (liveBusy) return;
+    liveBusy = true;
+    try {
+      const now = await client.getBlockNumber();
+      if (now >= liveFrom) {
+        await processRange(liveFrom, now);
+        liveFrom = now + 1n;
+        await saveCursor(db, cfg.chainId, now);
+      }
+    } catch (e) {
+      console.error("[live]", e);
+    } finally {
+      liveBusy = false;
+    }
+  }
+  setInterval(() => void liveTick(), 2_000);
+  void liveTick();
 
   setInterval(() => rescoreRecentTokens(db, cfg.chainId).catch(onErr), 10 * 60 * 1000);
   void enrichMissingTokenMeta(db, cfg.chainId).catch(onErr);

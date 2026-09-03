@@ -167,7 +167,7 @@ async function readOnchain(
   }
 }
 
-/** 持有者 Top20 + 流动池 + 成本/盈亏 + 同资金来源簇 + 钓鱼/捆绑标记 + 销毁地址 */
+/** 持有者 Top100 + 流动池 + 成本/盈亏 + 同资金来源簇 + 钓鱼/捆绑标记 + 销毁地址 */
 export async function GET(_req: Request, { params }: { params: Promise<{ address: string }> }) {
   try {
     const { address } = await params;
@@ -245,7 +245,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ address
           coalesce(c.n, 0)::int AS "clusterSize"
         FROM ranked r
         LEFT JOIN clusters c ON c.first_funder = r.first_funder
-        WHERE r.rn <= 40
+        WHERE r.rn <= 100
         ORDER BY r.rn
       `),
       db.execute(sql`
@@ -265,7 +265,29 @@ export async function GET(_req: Request, { params }: { params: Promise<{ address
                 AND wallet NOT IN (${zeroAddress}, ${DEAD})
               ORDER BY balance DESC LIMIT 10
             ) t
-          ), 0)::text AS "top10Balance"
+          ), 0)::text AS "top10Balance",
+          (
+            SELECT sum(cost_basis_eth::numeric) / nullif(sum(balance::numeric), 0)
+            FROM (
+              SELECT balance, cost_basis_eth FROM positions
+              WHERE chain_id = ${CHAIN_ID}
+                AND token_address = ${addr}
+                AND balance > 0
+                AND wallet NOT IN (${zeroAddress}, ${DEAD})
+              ORDER BY balance DESC LIMIT 10
+            ) c10
+          )::text AS "top10AvgCostEth",
+          (
+            SELECT sum(cost_basis_eth::numeric) / nullif(sum(balance::numeric), 0)
+            FROM (
+              SELECT balance, cost_basis_eth FROM positions
+              WHERE chain_id = ${CHAIN_ID}
+                AND token_address = ${addr}
+                AND balance > 0
+                AND wallet NOT IN (${zeroAddress}, ${DEAD})
+              ORDER BY balance DESC LIMIT 100
+            ) c100
+          )::text AS "top100AvgCostEth"
         FROM positions
         WHERE chain_id = ${CHAIN_ID} AND token_address = ${addr} AND balance > 0
       `),
@@ -296,8 +318,14 @@ export async function GET(_req: Request, { params }: { params: Promise<{ address
       lastSeenAt: string | null;
       clusterSize: number;
     }>(holdersRes);
-    const stats = asRows<{ holderCount: number; totalBalance: string; top10Balance: string }>(statsRes)[0] ?? {
-      holderCount: 0, totalBalance: "0", top10Balance: "0",
+    const stats = asRows<{
+      holderCount: number;
+      totalBalance: string;
+      top10Balance: string;
+      top10AvgCostEth: string | null;
+      top100AvgCostEth: string | null;
+    }>(statsRes)[0] ?? {
+      holderCount: 0, totalBalance: "0", top10Balance: "0", top10AvgCostEth: null, top100AvgCostEth: null,
     };
 
     // ── 开发者系地址:creator 本人 + 资金链两级关联(开发者出资的小号、小号再出资的二级小号) ──
@@ -364,7 +392,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ address
 
     const holders = rawHolders
       .filter((h) => !skip.has(h.wallet.toLowerCase()))
-      .slice(0, 20)
+      .slice(0, 100)
       .map((h) => {
         const bal = toWei(h.balanceRaw);
         const labels = parseLabels(h.labels);
@@ -467,6 +495,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ address
       devAltCount,
       holderCount: stats.holderCount ?? 0,
       top10Share: pctOf(top10, denom) / 100,
+      top10AvgCostEth: stats.top10AvgCostEth,
+      top100AvgCostEth: stats.top100AvgCostEth,
       totalSupplyWhole: whole(totalSupply),
       burnedWhole: burned > 0n ? whole(burned) : null,
       burnedPct: burned > 0n ? pctOf(burned, denom) : null,

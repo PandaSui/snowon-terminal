@@ -66,6 +66,10 @@ function shortAddr(a: string) {
   return `${a.slice(0, 6)}…${a.slice(-4)}`;
 }
 
+function shortTx(h: string) {
+  return `${h.slice(0, 8)}…${h.slice(-4)}`;
+}
+
 function parseTs(iso: string) {
   const t = new Date(iso.includes("T") ? iso : iso.replace(" ", "T")).getTime();
   return Number.isFinite(t) ? t : NaN;
@@ -186,7 +190,7 @@ export function TradeHistoryPanel({
     if (/^0x[0-9a-f]{40}$/.test(qq)) setOpenWallet(qq);
   }
 
-  const col = "108px 52px 1fr 1fr 1fr 1fr 1.3fr";
+  const col = "1.3fr 108px 52px 1fr 1fr 1fr 1fr 76px";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", minHeight: 0, height: "100%" }}>
@@ -254,13 +258,14 @@ export function TradeHistoryPanel({
           fontSize: 10, color: "#5e6673", fontWeight: 700, borderBottom: "1px solid #1e2329", flexShrink: 0,
         }}
       >
+        <span>交易者</span>
         <span>时间</span>
         <span>类型</span>
         <span>价格 $</span>
         <span>成本 $</span>
         <span>数量</span>
         <span>总额 USD</span>
-        <span>交易者</span>
+        <span>TX</span>
       </div>
 
       <div className="col-scroll" style={{ flex: 1, overflowY: "auto", minHeight: 80 }}>
@@ -280,26 +285,6 @@ export function TradeHistoryPanel({
                 outline: openWallet === t.trader ? "1px solid #f0b90b" : "none",
               }}
             >
-              <a
-                href={txUrl(CHAIN_ID, t.txHash)}
-                target="_blank"
-                rel="noreferrer"
-                title={timeAgo(t.blockTimestamp)}
-                style={{ color: "#848e9c", textDecoration: "none", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}
-              >
-                {fmtClock(t.blockTimestamp)}
-              </a>
-              <span style={{ color: st.color, fontWeight: 800 }}>{st.label}</span>
-              <span style={{ color: st.color, fontVariantNumeric: "tabular-nums" }}>
-                {isSwap ? fmtPriceUsd(t.priceEth, ethUsd) : "—"}
-              </span>
-              <span style={{ color: "#848e9c", fontVariantNumeric: "tabular-nums" }}>
-                {isSwap ? fmtPriceUsd(t.costEth, ethUsd) : "—"}
-              </span>
-              <span style={{ color: "#eaecef", fontVariantNumeric: "tabular-nums" }}>{fmtTokens(t.tokenAmountWhole)}</span>
-              <span style={{ color: st.color, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
-                {k === "burn" ? "—" : fmtQuote(t.ethAmount, "usd", ethUsd)}
-              </span>
               <span style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0 }}>
                 {t.isNewWallet && <span title="新钱包" style={{ fontSize: 10 }}>🐣</span>}
                 {t.isBundle && <span title="捆绑" style={{ fontSize: 10 }}>🔗</span>}
@@ -317,6 +302,32 @@ export function TradeHistoryPanel({
                   {shortAddr(t.trader)}
                 </button>
               </span>
+              <span
+                title={timeAgo(t.blockTimestamp)}
+                style={{ color: "#848e9c", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}
+              >
+                {fmtClock(t.blockTimestamp)}
+              </span>
+              <span style={{ color: st.color, fontWeight: 800 }}>{st.label}</span>
+              <span style={{ color: st.color, fontVariantNumeric: "tabular-nums" }}>
+                {isSwap ? fmtPriceUsd(t.priceEth, ethUsd) : "—"}
+              </span>
+              <span style={{ color: "#848e9c", fontVariantNumeric: "tabular-nums" }}>
+                {isSwap ? fmtPriceUsd(t.costEth, ethUsd) : "—"}
+              </span>
+              <span style={{ color: "#eaecef", fontVariantNumeric: "tabular-nums" }}>{fmtTokens(t.tokenAmountWhole)}</span>
+              <span style={{ color: st.color, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
+                {k === "burn" ? "—" : fmtQuote(t.ethAmount, "usd", ethUsd)}
+              </span>
+              <a
+                href={txUrl(CHAIN_ID, t.txHash)}
+                target="_blank"
+                rel="noreferrer"
+                title={t.txHash}
+                style={{ color: "#5e8bff", textDecoration: "none", fontFamily: "monospace", fontSize: 10, whiteSpace: "nowrap" }}
+              >
+                {shortTx(t.txHash)}
+              </a>
             </div>
           );
         })}

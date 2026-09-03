@@ -287,7 +287,7 @@ export default function TokenPage() {
   return (
     <main
       style={{
-        maxWidth: 1600, margin: "0 auto", padding: isMobile ? "8px 8px" : "10px 16px",
+        width: "100%", padding: isMobile ? "8px 8px" : "10px 16px",
         display: "flex", flexDirection: "column", gap: 10,
         minHeight: "100vh",
         boxSizing: "border-box",

@@ -60,6 +60,8 @@ interface HoldersData {
   creator?: string | null;
   devSharePct?: number | null;
   devAltCount?: number;
+  top10AvgCostEth?: string | null;
+  top100AvgCostEth?: string | null;
   holderCount: number;
   top10Share: number | null;
   totalSupplyWhole?: string;
@@ -252,6 +254,16 @@ export function HoldersPanel({ address, embedded, ethUsd }: { address: string; e
               <span title="代币创建者 + 其资金链关联小号(两级)的合计持仓">👨‍💻 开发者系合计{data.devAltCount ? `(${data.devAltCount} 个小号)` : ""}</span>
               <span style={{ color: data.devSharePct > 10 ? "#f6465d" : data.devSharePct > 5 ? "#f0b90b" : "#eaecef", fontWeight: 700 }}>
                 {fmtPct(data.devSharePct)}
+              </span>
+            </div>
+          )}
+          {(data?.top10AvgCostEth || data?.top100AvgCostEth) && (
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, color: "#848e9c", marginTop: 6 }}>
+              <span title="前 10 / 前 100 大持仓地址的加权平均成本价(仅统计被索引的买入,转入的币成本为 0)">平均持仓价(前10 / 前100)</span>
+              <span style={{ fontWeight: 700, color: "#eaecef", fontVariantNumeric: "tabular-nums" }}>
+                {fmtPriceUsd(data.top10AvgCostEth, ethUsd)}
+                <span style={{ color: "#5e6673", fontWeight: 400 }}> / </span>
+                {fmtPriceUsd(data.top100AvgCostEth, ethUsd)}
               </span>
             </div>
           )}

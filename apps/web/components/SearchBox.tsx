@@ -27,6 +27,7 @@ export function SearchBox() {
   const [q, setQ] = useState("");
   const [result, setResult] = useState<SearchResult | null>(null);
   const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -34,8 +35,15 @@ export function SearchBox() {
     const onDoc = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     };
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
     document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onEsc);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onEsc);
+    };
   }, []);
 
   function onChange(v: string) {
@@ -52,6 +60,7 @@ export function SearchBox() {
         const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
         const body = await readJson<SearchResult>(res);
         setResult(body);
+        setCopied(false);
         setOpen(true);
       } catch { /* 静默,不打断输入 */ }
     }, 250);
@@ -69,7 +78,17 @@ export function SearchBox() {
     setQ("");
   }
 
+  function copyAddress(address: string) {
+    navigator.clipboard.writeText(address).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }).catch(() => {});
+  }
+
   const isAddr = result?.kind === "address";
+  // 合约地址命中代币 → 居中大弹窗;其余维持输入框下方下拉
+  const showTokenModal = !!(open && isAddr && result?.isToken && result.tokens[0]);
+  const modalToken = showTokenModal ? result!.tokens[0] : null;
 
   return (
     <div ref={ref} style={{ position: "relative", width: 380, maxWidth: "38vw" }}>
@@ -86,7 +105,79 @@ export function SearchBox() {
       />
       <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "#5e6673", fontSize: 12 }}>🔍</span>
 
-      {open && result && (
+      {showTokenModal && modalToken && (
+        <div
+          onClick={() => setOpen(false)}
+          style={{
+            position: "fixed", inset: 0, zIndex: 100, background: "rgba(0,0,0,0.6)",
+            display: "flex", alignItems: "center", justifyContent: "center", padding: 16,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "min(520px, 92vw)", background: "#0d1117", border: "1px solid #2b3139",
+              borderRadius: 14, padding: "22px 22px 18px", boxShadow: "0 24px 64px rgba(0,0,0,0.65)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              <TokenLogo src={modalToken.logoUri} alt={modalToken.symbol} size={56} />
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 18, fontWeight: 800 }}>{modalToken.name}</span>
+                  <span style={{ fontSize: 13, color: "#848e9c", fontWeight: 700 }}>${modalToken.symbol}</span>
+                  {modalToken.graduated && (
+                    <span style={{ fontSize: 10, color: "#0ecb81", fontWeight: 700, border: "1px solid rgba(14,203,129,0.4)", borderRadius: 4, padding: "1px 5px" }}>
+                      已毕业
+                    </span>
+                  )}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
+                  <span style={{ fontFamily: "monospace", fontSize: 11, color: "#5e6673", wordBreak: "break-all" }}>
+                    {result!.address}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => copyAddress(result!.address!)}
+                    style={{
+                      flexShrink: 0, padding: "2px 8px", fontSize: 10, cursor: "pointer",
+                      background: "#1c2127", border: "1px solid #2b3139", borderRadius: 4,
+                      color: copied ? "#0ecb81" : "#848e9c",
+                    }}
+                  >
+                    {copied ? "✓ 已复制" : "复制"}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
+              <button
+                type="button"
+                onClick={() => goToken(result!.address!)}
+                style={{
+                  flex: 1, padding: "11px 0", border: 0, borderRadius: 8, cursor: "pointer",
+                  background: "#f0b90b", color: "#000", fontWeight: 800, fontSize: 14,
+                }}
+              >
+                查看代币 →
+              </button>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                style={{
+                  padding: "11px 18px", borderRadius: 8, cursor: "pointer",
+                  background: "#1c2127", border: "1px solid #2b3139", color: "#848e9c", fontWeight: 700, fontSize: 13,
+                }}
+              >
+                关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {open && result && !showTokenModal && (
         <div
           style={{
             position: "absolute", top: "calc(100% + 6px)", left: 0, right: 0, zIndex: 60,

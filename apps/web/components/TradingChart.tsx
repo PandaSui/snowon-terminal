@@ -6,6 +6,7 @@ import {
   createChart,
   CandlestickSeries,
   HistogramSeries,
+  LineSeries,
   type IChartApi,
   type UTCTimestamp,
 } from "lightweight-charts";
@@ -20,6 +21,19 @@ import { CHART_RESOLUTIONS, RES_LOOKBACK, RES_SECONDS, type ChartResolution } fr
  */
 
 const TZ_OFFSET = 8 * 3600;
+
+/** 右键菜单可开关的均线 */
+const MA_PERIODS = [5, 10, 30] as const;
+const MA_COLORS: Record<number, string> = { 5: "#f0b90b", 10: "#00c3ff", 30: "#b15bff" };
+
+function loadJson<T>(key: string, fallback: T): T {
+  try {
+    const v = JSON.parse(localStorage.getItem(key) ?? "");
+    return v as T;
+  } catch {
+    return fallback;
+  }
+}
 
 interface Bar {
   time: UTCTimestamp;
@@ -101,9 +115,9 @@ export function TradingChart({
       timeScale: { timeVisible: true, secondsVisible: false, borderColor: "#2b3139" },
       rightPriceScale: { borderColor: "#2b3139" },
       crosshair: { mode: 0 },
-      // 滚轮交给页面滚动,不在 K 线里吞掉
+      // 滚轮在 K 线上 = 缩放时间轴(页面滚动用按住拖拽);双指 pinch 同效
       handleScroll: { mouseWheel: false, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
-      handleScale: { mouseWheel: false, pinch: true, axisPressedMouseMove: true },
+      handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true, axisDoubleClickReset: true },
     });
     const candles = chart.addSeries(CandlestickSeries, {
       upColor: "#0ecb81",
@@ -127,10 +141,83 @@ export function TradingChart({
       chartRef.current = null;
       seriesRef.current = null;
       volRef.current = null;
+      maSeriesRef.current.clear();
     };
   }, []);
 
   const lastBarRef = useRef<Bar | null>(null);
+  /** 每个(代币/周期/单位)只 fit 一次;之后轮询刷新不再重置用户缩放 */
+  const fittedRef = useRef(false);
+  /** 当前已加载的 K 线(已按单位换算),供均线计算 */
+  const barsRef = useRef<Bar[]>([]);
+  const maSeriesRef = useRef<Map<number, ReturnType<IChartApi["addSeries"]>>>(new Map());
+
+  /* 指标开关(右键菜单),本地持久化 */
+  const [mas, setMas] = useState<number[]>([]);
+  const [showVol, setShowVol] = useState(true);
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const masRef = useRef(mas);
+  masRef.current = mas;
+
+  useEffect(() => {
+    const saved = loadJson<number[]>("chart.mas", []);
+    setMas(saved.filter((n): n is number => (MA_PERIODS as readonly number[]).includes(n)));
+    setShowVol(localStorage.getItem("chart.vol") !== "0");
+  }, []);
+
+  /** 按 barsRef 重算各周期均线;关闭的周期移除序列 */
+  function refreshMas() {
+    const chart = chartRef.current;
+    if (!chart) return;
+    const bars = barsRef.current;
+    for (const p of MA_PERIODS) {
+      const enabled = masRef.current.includes(p);
+      let s = maSeriesRef.current.get(p);
+      if (!enabled) {
+        if (s) {
+          chart.removeSeries(s as never);
+          maSeriesRef.current.delete(p);
+        }
+        continue;
+      }
+      if (!s) {
+        s = chart.addSeries(LineSeries, {
+          color: MA_COLORS[p],
+          lineWidth: 1,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          crosshairMarkerVisible: false,
+        });
+        maSeriesRef.current.set(p, s);
+      }
+      const data: Array<{ time: UTCTimestamp; value: number }> = [];
+      let sum = 0;
+      for (let i = 0; i < bars.length; i++) {
+        sum += bars[i].close;
+        if (i >= p) sum -= bars[i - p].close;
+        if (i >= p - 1) data.push({ time: bars[i].time, value: sum / p });
+      }
+      s.setData(data);
+    }
+  }
+
+  /** 重置:恢复时间轴与价格轴到自适应全览 */
+  function resetChart() {
+    const chart = chartRef.current;
+    if (!chart) return;
+    chart.priceScale("right").applyOptions({ autoScale: true });
+    chart.priceScale("vol").applyOptions({ autoScale: true });
+    chart.timeScale().resetTimeScale();
+    chart.timeScale().fitContent();
+  }
+
+  // 指标开关变化时即时应用
+  useEffect(() => {
+    refreshMas();
+  }, [mas]);
+  useEffect(() => {
+    volRef.current?.applyOptions({ visible: showVol });
+  }, [showVol]);
 
   useEffect(() => {
     if (!rateReady) return;
@@ -138,6 +225,7 @@ export function TradingChart({
     const symbol = `${chainId}:${tokenAddress}`;
     const res = RES_SECONDS[resolution] ?? 300;
     lastBarRef.current = null;
+    fittedRef.current = false;
 
     async function load() {
       const to = Math.floor(Date.now() / 1000);
@@ -151,20 +239,22 @@ export function TradingChart({
           setEmpty(true);
           seriesRef.current.setData([]);
           volRef.current?.setData([]);
+          barsRef.current = [];
           lastBarRef.current = null;
+          refreshMas();
           return;
         }
         setEmpty(false);
         const m = multRef.current;
-        seriesRef.current.setData(
-          d.t.map((t, i) => ({
-            time: (t + TZ_OFFSET) as UTCTimestamp,
-            open: d.o![i] * m,
-            high: d.h![i] * m,
-            low: d.l![i] * m,
-            close: d.c![i] * m,
-          })),
-        );
+        const bars: Bar[] = d.t.map((t, i) => ({
+          time: (t + TZ_OFFSET) as UTCTimestamp,
+          open: d.o![i] * m,
+          high: d.h![i] * m,
+          low: d.l![i] * m,
+          close: d.c![i] * m,
+        }));
+        barsRef.current = bars;
+        seriesRef.current.setData(bars);
         volRef.current?.setData(
           d.t.map((t, i) => ({
             time: (t + TZ_OFFSET) as UTCTimestamp,
@@ -172,6 +262,8 @@ export function TradingChart({
             color: d.c![i] >= d.o![i] ? "rgba(14,203,129,0.4)" : "rgba(246,70,93,0.4)",
           })),
         );
+        volRef.current?.applyOptions({ visible: showVol });
+        refreshMas();
         const n = d.t.length - 1;
         lastBarRef.current = {
           time: (d.t[n] + TZ_OFFSET) as UTCTimestamp,
@@ -180,7 +272,10 @@ export function TradingChart({
           low: d.l![n] * m,
           close: d.c![n] * m,
         };
-        requestAnimationFrame(() => chartRef.current?.timeScale().fitContent());
+        if (!fittedRef.current) {
+          fittedRef.current = true;
+          requestAnimationFrame(() => chartRef.current?.timeScale().fitContent());
+        }
       } catch {
         if (!cancelled) setEmpty(true);
       }
@@ -198,7 +293,11 @@ export function TradingChart({
           ? { ...last, high: Math.max(last.high, price), low: Math.min(last.low, price), close: price }
           : { time: bucket, open: price, high: price, low: price, close: price };
       lastBarRef.current = bar;
+      const bars = barsRef.current;
+      if (bars.length && bars[bars.length - 1].time === bar.time) bars[bars.length - 1] = bar;
+      else bars.push(bar);
       seriesRef.current.update(bar);
+      refreshMas();
       setEmpty(false);
     });
 
@@ -287,9 +386,70 @@ export function TradingChart({
         >
           {unit === "usd" ? "$ USD" : "Ξ ETH"}
         </button>
+        <span style={{ fontSize: 10, color: "#3d4450", whiteSpace: "nowrap" }} title="滚轮缩放 · 拖拽平移 · 双击刻度复位">
+          滚轮缩放 · 双击复位
+        </span>
       </div>
       <div style={{ position: "relative", width: "100%", flex: 1, minHeight: 0 }}>
-        <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
+        <div
+          ref={containerRef}
+          style={{ width: "100%", height: "100%" }}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            const r = e.currentTarget.getBoundingClientRect();
+            setMenu({ x: Math.min(e.clientX - r.left, r.width - 170), y: Math.min(e.clientY - r.top, r.height - 190) });
+          }}
+          onClick={() => setMenu(null)}
+        />
+        {menu && (
+          <div
+            style={{
+              position: "absolute", left: menu.x, top: menu.y, zIndex: 30, minWidth: 150,
+              background: "#161b22", border: "1px solid #2b3139", borderRadius: 8, padding: 4,
+              boxShadow: "0 8px 24px rgba(0,0,0,0.55)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+            onContextMenu={(e) => e.preventDefault()}
+          >
+            <div style={{ fontSize: 10, color: "#5e6673", padding: "4px 10px 2px", fontWeight: 700 }}>指标</div>
+            {MA_PERIODS.map((p) => {
+              const on = mas.includes(p);
+              return (
+                <MenuItem
+                  key={p}
+                  onClick={() => {
+                    const next = on ? mas.filter((n) => n !== p) : [...mas, p];
+                    setMas(next);
+                    localStorage.setItem("chart.mas", JSON.stringify(next));
+                  }}
+                >
+                  <span style={{ color: MA_COLORS[p], width: 14, display: "inline-block" }}>{on ? "✓" : ""}</span>
+                  MA{p} 均线
+                </MenuItem>
+              );
+            })}
+            <MenuItem
+              onClick={() => {
+                const next = !showVol;
+                setShowVol(next);
+                localStorage.setItem("chart.vol", next ? "1" : "0");
+              }}
+            >
+              <span style={{ color: "#848e9c", width: 14, display: "inline-block" }}>{showVol ? "✓" : ""}</span>
+              成交量 VOL
+            </MenuItem>
+            <div style={{ borderTop: "1px solid #2b3139", margin: "4px 0" }} />
+            <MenuItem
+              onClick={() => {
+                resetChart();
+                setMenu(null);
+              }}
+            >
+              <span style={{ width: 14, display: "inline-block" }}>⟲</span>
+              重置 K 线
+            </MenuItem>
+          </div>
+        )}
         {empty && (
           <div
             style={{
@@ -308,5 +468,24 @@ export function TradingChart({
         )}
       </div>
     </div>
+  );
+}
+
+function MenuItem({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        display: "flex", alignItems: "center", width: "100%", padding: "6px 10px",
+        fontSize: 12, fontWeight: 600, cursor: "pointer", textAlign: "left",
+        background: hover ? "#1c2127" : "transparent", border: 0, borderRadius: 5, color: "#eaecef",
+      }}
+    >
+      {children}
+    </button>
   );
 }
