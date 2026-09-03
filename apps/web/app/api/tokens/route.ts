@@ -66,8 +66,17 @@ export async function GET() {
           END AS "change24hPct",
           bs.score AS "bundleScore",
           bs.same_funder_share::text AS "bundleShare",
-          bs.launch_block_buy_share::text AS "launchBuyShare"
+          bs.launch_block_buy_share::text AS "launchBuyShare",
+          v24.vol::text AS "volume24hEth"
         FROM tokens t
+        LEFT JOIN LATERAL (
+          SELECT coalesce(sum(tr.eth_amount::numeric), 0) / 1e18 AS vol
+          FROM trades tr
+          WHERE tr.chain_id = t.chain_id
+            AND tr.token_address = t.address
+            AND tr.kind IN ('buy', 'sell')
+            AND tr.block_timestamp >= now() - interval '24 hours'
+        ) v24 ON true
         LEFT JOIN latest_prices lp
           ON lp.token_address = t.address AND lp.chain_id = t.chain_id
         LEFT JOIN bundle_scores bs
@@ -132,6 +141,9 @@ export async function GET() {
       )
       SELECT
         l.*,
+        CASE WHEN l."volume24hEth"::numeric > 0
+          THEN row_number() OVER (ORDER BY l."volume24hEth"::numeric DESC)::int
+        END AS "volRank",
         coalesce(hs."top10Share", '0') AS "top10Share",
         coalesce(ps."phishShare", '0') AS "phishShare",
         spark.prices AS spark

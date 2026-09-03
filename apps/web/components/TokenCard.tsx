@@ -21,6 +21,9 @@ export interface HomeToken {
   graduationProgress: string | null;
   mcapEth: string | null;
   change24hPct: string | null;
+  /** 24h 成交量(ETH 计)与按量排名;排名 ≤3 且量 >0 视为热门 */
+  volume24hEth?: string | null;
+  volRank?: number | null;
   website?: string | null;
   twitter?: string | null;
   telegram?: string | null;
@@ -207,6 +210,8 @@ function TokenCardInner({ t }: { t: HomeToken }) {
   const top10 = numShare(t.top10Share);
   const bundle = numShare(t.bundleShare);
   const phish = numShare(t.phishShare);
+  const vol24 = numShare(t.volume24hEth) ?? 0;
+  const hot = t.volRank != null && t.volRank <= 3 && vol24 > 0;
   const spark = t.spark ?? [];
   const sparkUp = spark.length >= 2 ? spark[spark.length - 1] >= spark[0] : change.color === "#0ecb81";
 
@@ -282,6 +287,19 @@ function TokenCardInner({ t }: { t: HomeToken }) {
                 <span style={{ fontWeight: 700, fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                   {t.name}
                 </span>
+                {hot && (
+                  <span
+                    title={`🔥 热门:24h 交易量第 ${t.volRank} 名`}
+                    style={{
+                      display: "inline-flex", alignItems: "center", gap: 2, flexShrink: 0,
+                      padding: "1px 6px", fontSize: 10, fontWeight: 800, lineHeight: "14px",
+                      borderRadius: 4, color: "#ff8a00",
+                      background: "rgba(255,138,0,0.12)", border: "1px solid rgba(255,138,0,0.35)",
+                    }}
+                  >
+                    🔥{t.volRank === 1 ? "TOP1" : t.volRank === 2 ? "TOP2" : "TOP3"}
+                  </span>
+                )}
                 {t.antiBundle && <span title="antiBundle" style={{ fontSize: 10 }}>🛡</span>}
               </div>
               <div style={{ fontSize: 11, color: "#848e9c" }}>
@@ -308,14 +326,19 @@ function TokenCardInner({ t }: { t: HomeToken }) {
             <Stat label="钓鱼" share={phish} kind="phish" hint="钓鱼/混币钱包占总量比例" />
           </div>
 
-          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, fontSize: 12 }}>
-            <span style={{ color: "#848e9c" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 8, fontSize: 12 }}>
+            <span style={{ color: "#848e9c", whiteSpace: "nowrap" }}>
               市值 <span style={{ color: "#eaecef", fontWeight: 700 }}>{fmtUsd(t.mcapEth, eth?.price)}</span>
             </span>
+            <span style={{ color: "#848e9c", whiteSpace: "nowrap" }} title="24小时成交量">
+              量 <span style={{ color: hot ? "#ff8a00" : "#eaecef", fontWeight: 700 }}>
+                {vol24 > 0 ? fmtUsd(String(vol24), eth?.price) : "-"}
+              </span>
+            </span>
             {t.graduated ? (
-              <span style={{ color: "#0ecb81", fontSize: 11, fontWeight: 600 }}>✅ 已毕业</span>
+              <span style={{ color: "#0ecb81", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>✅ 已毕业</span>
             ) : (
-              <span style={{ color: "#f0b90b", fontSize: 11, fontWeight: 600 }}>
+              <span style={{ color: "#f0b90b", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>
                 {((progress ?? 0) * 100).toFixed(1)}%
               </span>
             )}
@@ -362,6 +385,8 @@ export const TokenCard = memo(TokenCardInner, (prev, next) => {
     a.priceEth === b.priceEth &&
     a.change24hPct === b.change24hPct &&
     a.mcapEth === b.mcapEth &&
+    a.volume24hEth === b.volume24hEth &&
+    a.volRank === b.volRank &&
     a.graduationProgress === b.graduationProgress &&
     a.graduated === b.graduated &&
     a.top10Share === b.top10Share &&
