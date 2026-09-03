@@ -5,6 +5,7 @@ import { snowAbis } from "@terminal/adapters";
 import { chainConfigs } from "@terminal/db";
 import { db } from "@/lib/db";
 import { apiError } from "@/lib/api";
+import { envAdminWallets, isAdminWallet } from "@/lib/admins";
 import { invalidateChainConfigCache, listChainConfigs, type ChainConfigRow } from "@/lib/chainConfigs";
 
 /**
@@ -22,18 +23,10 @@ function jsonSafe<T>(v: T): T {
   return JSON.parse(JSON.stringify(v, (_k, val) => (typeof val === "bigint" ? val.toString() : val)));
 }
 
-function adminWallets(): string[] {
-  const raw = process.env.ADMIN_WALLETS ?? process.env.NEXT_PUBLIC_ADMIN_WALLETS ?? "";
-  return raw.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
-}
-
-function checkAdmin(req: NextRequest): NextResponse | null {
-  const list = adminWallets();
-  if (list.length === 0) {
-    return NextResponse.json({ error: "服务端未配置 ADMIN_WALLETS,写操作已禁用" }, { status: 503 });
-  }
+async function checkAdmin(req: NextRequest): Promise<NextResponse | null> {
   const wallet = (req.headers.get("x-admin-wallet") ?? "").toLowerCase();
-  if (!list.includes(wallet)) {
+  // 合并名单:env 主管理员 ∪ DB 协管员(见 /api/admin/admins)
+  if (!/^0x[0-9a-f]{40}$/.test(wallet) || !(await isAdminWallet(wallet))) {
     return NextResponse.json({ error: "非管理员钱包,无权修改链配置" }, { status: 403 });
   }
   return null;
@@ -109,7 +102,7 @@ export async function GET() {
       const onchain = await readOnchain(row);
       result.push(jsonSafe({ ...row, onchain }));
     }
-    return NextResponse.json({ chains: result, adminWalletsConfigured: adminWallets().length > 0 });
+    return NextResponse.json({ chains: result, adminWalletsConfigured: envAdminWallets().length > 0 });
   } catch (e) {
     return apiError(e);
   }
@@ -142,7 +135,7 @@ function validatePatch(body: Record<string, unknown>): { patch: Record<string, u
 }
 
 export async function PUT(req: NextRequest) {
-  const deny = checkAdmin(req);
+  const deny = await checkAdmin(req);
   if (deny) return deny;
   try {
     const body = (await req.json()) as Record<string, unknown>;
@@ -168,7 +161,7 @@ export async function PUT(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const deny = checkAdmin(req);
+  const deny = await checkAdmin(req);
   if (deny) return deny;
   try {
     const body = (await req.json()) as Record<string, unknown>;

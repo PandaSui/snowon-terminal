@@ -282,3 +282,12 @@ export const userProfiles = pgTable(
   },
   (t) => [primaryKey({ columns: [t.chainId, t.wallet] })],
 );
+
+// ────────────────────────── 管理员名单 ──────────────────────────
+/** env(ADMIN_WALLETS)为主管理员、不可移除;此表为可通过管理面板增删的协管员 */
+export const adminWallets = pgTable("admin_wallets", {
+  address: varchar("address", { length: 42 }).primaryKey(),
+  /** 添加他的管理员地址 */
+  addedBy: varchar("added_by", { length: 42 }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});

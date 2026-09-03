@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { usePrivy } from "@privy-io/react-auth";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { readJson } from "@/lib/http";
+import { useAdmins } from "@/lib/useAdmins";
 import { useIsMobile } from "@/lib/useIsMobile";
 
 /** 与 /api/admin/chains GET 响应对应的行形状(BigInt 已 jsonSafe 成 string) */
@@ -253,6 +254,106 @@ function ChainCard({ chain, isAdmin }: { chain: AdminChain; isAdmin: boolean }) 
   );
 }
 
+/** 管理员名单管理卡:列出主管理员(env)与协管员(DB),管理员可增删协管员 */
+function AdminsCard({ wallet, isAdmin }: { wallet: string; isAdmin: boolean }) {
+  const qc = useQueryClient();
+  const { admins } = useAdmins(wallet);
+  const [input, setInput] = useState("");
+
+  const add = useMutation({
+    mutationFn: async (address: string) => {
+      const res = await fetch("/api/admin/admins", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-admin-wallet": wallet },
+        body: JSON.stringify({ address }),
+      });
+      const body = await readJson<{ error?: string }>(res);
+      if (!res.ok) throw new Error(body.error ?? `添加失败(${res.status})`);
+    },
+    onSuccess: () => {
+      setInput("");
+      qc.invalidateQueries({ queryKey: ["admin-wallets"] });
+    },
+  });
+
+  const remove = useMutation({
+    mutationFn: async (address: string) => {
+      const res = await fetch(`/api/admin/admins?address=${encodeURIComponent(address)}`, {
+        method: "DELETE",
+        headers: { "x-admin-wallet": wallet },
+      });
+      const body = await readJson<{ error?: string }>(res);
+      if (!res.ok) throw new Error(body.error ?? `移除失败(${res.status})`);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-wallets"] }),
+  });
+
+  const err = (add.error ?? remove.error) as Error | null;
+
+  return (
+    <section style={{ border: "1px solid #1e2329", borderRadius: 10, background: "#0d1117", overflow: "hidden" }}>
+      <header style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 14px", borderBottom: "1px solid #1e2329" }}>
+        <span style={{ fontWeight: 700, fontSize: 14 }}>👑 管理员名单</span>
+        <span style={{ fontSize: 11, color: "#5e6673" }}>管理员可添加/移除协管员;主管理员由配置文件管理,不可移除</span>
+        <span style={{ marginLeft: "auto", fontSize: 11, color: "#5e6673", background: "#1e2329", borderRadius: 8, padding: "1px 8px" }}>
+          {admins.length}
+        </span>
+      </header>
+      <div style={{ padding: "10px 14px", display: "flex", flexDirection: "column", gap: 6 }}>
+        {admins.map((a) => (
+          <div key={a.address} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, flexWrap: "wrap" }}>
+            <span
+              style={{
+                fontSize: 10, fontWeight: 700, borderRadius: 4, padding: "1px 6px",
+                color: a.source === "env" ? "#f0b90b" : "#00c3ff",
+                border: `1px solid ${a.source === "env" ? "rgba(240,185,11,0.4)" : "rgba(0,195,255,0.4)"}`,
+              }}
+            >
+              {a.source === "env" ? "主管理员" : "协管员"}
+            </span>
+            <span style={{ fontFamily: "monospace", color: "#eaecef" }}>{a.address}</span>
+            {a.address === wallet && <span style={{ fontSize: 10, color: "#0ecb81" }}>(当前钱包)</span>}
+            {a.addedBy && (
+              <span style={{ fontSize: 10, color: "#5e6673" }}>
+                由 {a.addedBy.slice(0, 8)}… 添加{a.createdAt ? ` · ${new Date(a.createdAt).toLocaleString()}` : ""}
+              </span>
+            )}
+            <CopyBtn value={a.address} />
+            {isAdmin && a.source === "db" && (
+              <button
+                onClick={() => remove.mutate(a.address)}
+                disabled={remove.isPending}
+                style={{ ...btnGhost, padding: "2px 8px", fontSize: 11, color: "#f6465d", borderColor: "rgba(246,70,93,0.4)" }}
+              >
+                移除
+              </button>
+            )}
+          </div>
+        ))}
+        {isAdmin && (
+          <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+            <input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="输入钱包地址,添加为协管员 0x…"
+              spellCheck={false}
+              style={{ ...inputStyle, flex: 1 }}
+            />
+            <button
+              onClick={() => add.mutate(input.trim())}
+              disabled={add.isPending || !/^0x[0-9a-fA-F]{40}$/.test(input.trim())}
+              style={{ ...btnGold, opacity: add.isPending || !/^0x[0-9a-fA-F]{40}$/.test(input.trim()) ? 0.5 : 1 }}
+            >
+              {add.isPending ? "添加中…" : "+ 添加管理员"}
+            </button>
+          </div>
+        )}
+        {err && <div style={{ color: "#f6465d", fontSize: 12 }}>❌ {err.message}</div>}
+      </div>
+    </section>
+  );
+}
+
 export default function AdminPage() {
   const { login, logout, authenticated, user } = usePrivy();
   const isMobile = useIsMobile();
@@ -260,11 +361,8 @@ export default function AdminPage() {
   const [creating, setCreating] = useState(false);
   const wallet = user?.wallet?.address?.toLowerCase() ?? "";
 
-  const adminList = useMemo(
-    () => (process.env.NEXT_PUBLIC_ADMIN_WALLETS ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
-    [],
-  );
-  const isAdmin = !!wallet && adminList.includes(wallet);
+  const adminQuery = useAdmins(wallet);
+  const isAdmin = adminQuery.isAdmin;
 
   const { data, isLoading, isError, error, dataUpdatedAt } = useQuery({
     queryKey: ["admin-chains"],
@@ -332,7 +430,7 @@ export default function AdminPage() {
       {!isAdmin && (
         <div style={{ padding: "8px 12px", border: "1px solid #f0b90b44", borderRadius: 8, background: "rgba(240,185,11,0.06)", fontSize: 12, color: "#f0b90b" }}>
           {authenticated
-            ? "当前钱包不在管理员名单(NEXT_PUBLIC_ADMIN_WALLETS),查看模式。"
+            ? "当前钱包不在管理员名单,查看模式。"
             : "连接管理员钱包后可编辑参数;当前为查看模式。"}
         </div>
       )}
@@ -342,6 +440,8 @@ export default function AdminPage() {
 
       {isLoading && <div style={{ color: "#848e9c", padding: 20 }}>加载中…</div>}
       {isError && <div style={{ color: "#f6465d", padding: 20 }}>加载失败:{(error as Error).message}</div>}
+
+      <AdminsCard wallet={wallet} isAdmin={isAdmin} />
 
       {data?.chains.map((c) => <ChainCard key={c.chainId} chain={c} isAdmin={isAdmin} />)}
       {data && data.chains.length === 0 && (

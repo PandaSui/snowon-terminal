@@ -15,6 +15,7 @@ import { AiPanel } from "@/components/AiPanel";
 import { PortfolioPanel } from "@/components/PortfolioPanel";
 import { FavoritesBar } from "@/components/FavoritesBar";
 import { useIsMobile } from "@/lib/useIsMobile";
+import { useAdmins } from "@/lib/useAdmins";
 
 const CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? 4663);
 
@@ -61,10 +62,9 @@ export default function DiscoverPage() {
   const isMobile = useIsMobile();
   const [tab, setTab] = useState<"movers" | "fresh" | "almost" | "graduated" | "chat">("movers");
 
-  // 管理员钱包(命中 NEXT_PUBLIC_ADMIN_WALLETS)才显示「管理」入口
+  // 管理员钱包(env 主管理员 ∪ DB 协管员)才显示「管理」入口
   const wallet = user?.wallet?.address?.toLowerCase() ?? "";
-  const isAdmin = !!wallet && (process.env.NEXT_PUBLIC_ADMIN_WALLETS ?? "")
-    .split(",").map((s) => s.trim().toLowerCase()).includes(wallet);
+  const isAdmin = useAdmins(wallet).isAdmin;
 
   const lists = useMemo(() => {
     const all = tokens ?? [];

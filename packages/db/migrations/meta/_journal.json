@@ -50,6 +50,13 @@
       "when": 1788530000000,
       "tag": "0006_user_profiles",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1788540000000,
+      "tag": "0007_admin_wallets",
+      "breakpoints": true
     }
   ]
 }
