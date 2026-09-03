@@ -1,0 +1,201 @@
+import { NextRequest, NextResponse } from "next/server";
+import { eq } from "drizzle-orm";
+import { createPublicClient, http, zeroAddress, type Address, type Chain } from "viem";
+import { snowAbis } from "@terminal/adapters";
+import { chainConfigs } from "@terminal/db";
+import { db } from "@/lib/db";
+import { apiError } from "@/lib/api";
+import { invalidateChainConfigCache, listChainConfigs, type ChainConfigRow } from "@/lib/chainConfigs";
+
+/**
+ * 管理面板:每条链的发射工厂参数配置。
+ * GET    /api/admin/chains        列表 + 链上实时参数(只读)
+ * PUT    /api/admin/chains        更新某链配置(需管理员钱包 header)
+ * POST   /api/admin/chains        新增链配置(需管理员钱包 header)
+ *
+ * 鉴权说明(开发阶段):写操作校验 x-admin-wallet 请求头是否命中
+ * ADMIN_WALLETS / NEXT_PUBLIC_ADMIN_WALLETS(逗号分隔)。这只是名单拦截,
+ * 正式环境应换成 Privy access token 验签(参考 apps/chat 的 PRIVY_APP_SECRET 流程)。
+ */
+
+function jsonSafe<T>(v: T): T {
+  return JSON.parse(JSON.stringify(v, (_k, val) => (typeof val === "bigint" ? val.toString() : val)));
+}
+
+function adminWallets(): string[] {
+  const raw = process.env.ADMIN_WALLETS ?? process.env.NEXT_PUBLIC_ADMIN_WALLETS ?? "";
+  return raw.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+}
+
+function checkAdmin(req: NextRequest): NextResponse | null {
+  const list = adminWallets();
+  if (list.length === 0) {
+    return NextResponse.json({ error: "服务端未配置 ADMIN_WALLETS,写操作已禁用" }, { status: 503 });
+  }
+  const wallet = (req.headers.get("x-admin-wallet") ?? "").toLowerCase();
+  if (!list.includes(wallet)) {
+    return NextResponse.json({ error: "非管理员钱包,无权修改链配置" }, { status: 403 });
+  }
+  return null;
+}
+
+/** 任意 chainId 的通用 viem Chain(管理面板可能登记未收录的链) */
+function genericChain(chainId: number, name: string, rpcUrl: string): Chain {
+  return {
+    id: chainId,
+    name,
+    nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+    rpcUrls: { default: { http: [rpcUrl] } },
+  };
+}
+
+const ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
+
+/** 链上实时参数:逐条读,失败降级为 null 并带错误说明,不拖垮整个列表 */
+async function readOnchain(row: ChainConfigRow) {
+  const client = createPublicClient({
+    chain: genericChain(row.chainId, row.name, row.rpcUrl),
+    // 该 RPC 网关在批量模式下会间歇丢响应(见 apps/indexer/src/config.ts 注释),必须单请求
+    transport: http(row.rpcUrl, { batch: false, retryCount: 1, retryDelay: 500, timeout: 8000 }),
+  });
+  const out: Record<string, unknown> = {};
+  const safe = async <T>(key: string, fn: () => Promise<T>, fmt: (v: T) => unknown = (v) => v) => {
+    try {
+      out[key] = fmt(await fn());
+    } catch (e) {
+      out[key] = null;
+      out[`${key}Error`] = (e as Error).message.slice(0, 80);
+    }
+  };
+
+  // 五个合约地址的部署状态(getCode)
+  for (const [key, addr] of Object.entries({
+    factory: row.factory, hook: row.hook, registry: row.registry,
+    swapRouter: row.swapRouter, poolManager: row.poolManager,
+  })) {
+    await safe(`deployed_${key}`, async () => ((await client.getCode({ address: addr as Address })) ?? "0x") !== "0x");
+  }
+  // 工厂参数
+  await safe("tokenCount", () =>
+    client.readContract({ address: row.factory as Address, abi: snowAbis.snowOnFactoryAbi, functionName: "allTokensLength" }),
+  );
+  await safe("protocolSplit", async () => {
+    const [creatorBps, snowBuyBps, revenueBps] = await client.readContract({
+      address: row.factory as Address, abi: snowAbis.snowOnFactoryAbi, functionName: "protocolSplit",
+    });
+    return { creatorBps, snowBuyBps, revenueBps };
+  });
+  await safe("graduationThresholdEth", async () => {
+    const wei = await client.readContract({
+      address: row.factory as Address, abi: snowAbis.snowOnFactoryAbi, functionName: "graduationThreshold", args: [zeroAddress],
+    });
+    return Number(wei) / 1e18;
+  });
+  // 路由费 / 报价资产白名单
+  await safe("swapRouterFeeBps", () =>
+    client.readContract({ address: row.swapRouter as Address, abi: snowAbis.snowSwapRouterAbi, functionName: "feeBps" }),
+  );
+  await safe("allowedPairs", () =>
+    client.readContract({ address: row.registry as Address, abi: snowAbis.snowPairRegistryAbi, functionName: "allowedPairsLength" }),
+  );
+  return out;
+}
+
+export async function GET() {
+  try {
+    const rows = await listChainConfigs();
+    const result = [];
+    for (const row of rows) {
+      const onchain = await readOnchain(row);
+      result.push(jsonSafe({ ...row, onchain }));
+    }
+    return NextResponse.json({ chains: result, adminWalletsConfigured: adminWallets().length > 0 });
+  } catch (e) {
+    return apiError(e);
+  }
+}
+
+const EDITABLE = ["name", "rpcUrl", "wsUrl", "factory", "hook", "registry", "swapRouter", "poolManager", "deployBlock", "enabled"] as const;
+
+function validatePatch(body: Record<string, unknown>): { patch: Record<string, unknown>; error?: string } {
+  const patch: Record<string, unknown> = {};
+  for (const key of EDITABLE) {
+    if (!(key in body)) continue;
+    const v = body[key];
+    if (["factory", "hook", "registry", "swapRouter", "poolManager"].includes(key)) {
+      if (typeof v !== "string" || !ADDR_RE.test(v)) return { patch, error: `${key} 不是合法地址` };
+      patch[key] = v.toLowerCase();
+    } else if (key === "deployBlock") {
+      const n = Number(v);
+      if (!Number.isFinite(n) || n < 0) return { patch, error: "deployBlock 必须是非负数字" };
+      patch[key] = BigInt(Math.floor(n));
+    } else if (key === "enabled") {
+      patch[key] = !!v;
+    } else if (key === "wsUrl") {
+      patch[key] = typeof v === "string" && v.trim() ? v.trim() : null;
+    } else {
+      if (typeof v !== "string" || !v.trim()) return { patch, error: `${key} 不能为空` };
+      patch[key] = v.trim();
+    }
+  }
+  return { patch };
+}
+
+export async function PUT(req: NextRequest) {
+  const deny = checkAdmin(req);
+  if (deny) return deny;
+  try {
+    const body = (await req.json()) as Record<string, unknown>;
+    const chainId = Number(body.chainId);
+    if (!Number.isInteger(chainId) || chainId <= 0) {
+      return NextResponse.json({ error: "chainId 缺失或非法" }, { status: 400 });
+    }
+    const { patch, error } = validatePatch(body);
+    if (error) return NextResponse.json({ error }, { status: 400 });
+    if (Object.keys(patch).length === 0) return NextResponse.json({ error: "没有可更新字段" }, { status: 400 });
+
+    const [updated] = await db
+      .update(chainConfigs)
+      .set({ ...patch, updatedAt: new Date() })
+      .where(eq(chainConfigs.chainId, chainId))
+      .returning();
+    if (!updated) return NextResponse.json({ error: `chain ${chainId} 不存在,请用 POST 新增` }, { status: 404 });
+    invalidateChainConfigCache(chainId);
+    return NextResponse.json(jsonSafe({ ok: true, chain: updated }));
+  } catch (e) {
+    return apiError(e);
+  }
+}
+
+export async function POST(req: NextRequest) {
+  const deny = checkAdmin(req);
+  if (deny) return deny;
+  try {
+    const body = (await req.json()) as Record<string, unknown>;
+    const chainId = Number(body.chainId);
+    if (!Number.isInteger(chainId) || chainId <= 0) {
+      return NextResponse.json({ error: "chainId 缺失或非法" }, { status: 400 });
+    }
+    const { patch, error } = validatePatch(body);
+    if (error) return NextResponse.json({ error }, { status: 400 });
+    for (const required of ["name", "rpcUrl", "factory", "hook", "registry", "swapRouter", "poolManager"] as const) {
+      if (!(required in patch)) return NextResponse.json({ error: `缺少必填字段 ${required}` }, { status: 400 });
+    }
+    const [created] = await db
+      .insert(chainConfigs)
+      .values({
+        chainId,
+        platformId: typeof body.platformId === "string" && body.platformId.trim() ? body.platformId.trim() : "snowon",
+        deployBlock: 0n,
+        enabled: true,
+        ...(patch as Record<string, unknown>),
+      } as never)
+      .onConflictDoNothing()
+      .returning();
+    if (!created) return NextResponse.json({ error: `chain ${chainId} 已存在,请用 PUT 修改` }, { status: 409 });
+    invalidateChainConfigCache(chainId);
+    return NextResponse.json(jsonSafe({ ok: true, chain: created }));
+  } catch (e) {
+    return apiError(e);
+  }
+}

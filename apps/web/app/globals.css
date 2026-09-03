@@ -1,0 +1,202 @@
+/* 全局样式:叮住消息炫彩效果 + 上翻轮换动画 + 栏目滚动条 */
+
+/* 炫彩流动渐变文字 */
+@keyframes pin-rainbow {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 600% 50%; }
+}
+
+/* 闪烁 */
+@keyframes pin-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+.pin-flash {
+  background: linear-gradient(90deg, #ff004c, #ff8a00, #ffee00, #33ff57, #00c3ff, #b15bff, #ff004c);
+  background-size: 600% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: pin-rainbow 2.5s linear infinite, pin-blink 0.9s ease-in-out infinite;
+  font-weight: 800;
+}
+
+/* 上翻进入 */
+@keyframes pin-flip-up {
+  0% { transform: translateY(110%); opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+
+.pin-flip {
+  animation: pin-flip-up 0.45s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* 弹幕:从右向左飘过 K 线 */
+@keyframes danmaku-fly {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(calc(-100% - 100vw)); }
+}
+.danmaku-item {
+  position: absolute;
+  white-space: nowrap;
+  pointer-events: none;
+  font-size: 15px;
+  animation: danmaku-fly 9s linear forwards;
+  text-shadow: 0 0 8px rgba(0, 0, 0, 0.8);
+}
+
+/* 细滚动条 */
+.col-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #2b3139 transparent;
+}
+.col-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.col-scroll::-webkit-scrollbar-thumb {
+  background: #2b3139;
+  border-radius: 3px;
+}
+.col-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 代币卡片 hover:只描边,不盖住火花线 */
+.token-card {
+  transition: border-color 0.15s ease;
+}
+.token-card:hover {
+  border-color: #f0b90b !important;
+}
+.token-card-spark {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.48;
+}
+/* 持有者:同资金来源簇 — 左侧红色虚线 + 淡红斜纹 */
+.holder-cluster {
+  position: relative;
+  overflow: hidden;
+  border-radius: 6px;
+  border-left: 3px dashed #f6465d;
+  background: linear-gradient(90deg, rgba(246, 70, 93, 0.22) 0%, rgba(246, 70, 93, 0.07) 42%, transparent 100%);
+}
+.holder-cluster::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    -55deg,
+    transparent 0 5px,
+    rgba(246, 70, 93, 0.1) 5px 6px
+  );
+}
+.holder-pool {
+  border-left: 3px solid #00c3ff;
+  background: linear-gradient(90deg, rgba(0, 195, 255, 0.16) 0%, rgba(0, 195, 255, 0.05) 48%, transparent 100%);
+}
+.holders-row {
+  min-width: 560px;
+}
+
+.chart-resize {
+  height: 10px;
+  margin: -5px 0;
+  cursor: ns-resize;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  touch-action: none;
+  flex-shrink: 0;
+}
+.chart-resize::after {
+  content: "";
+  width: 56px;
+  height: 4px;
+  border-radius: 2px;
+  background: #2b3139;
+}
+.chart-resize:hover::after,
+.chart-resize:active::after {
+  background: #f0b90b;
+}
+.chat-resize {
+  width: 10px;
+  margin: 0 -5px;
+  cursor: ew-resize;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  touch-action: none;
+  flex-shrink: 0;
+}
+.chat-resize::after {
+  content: "";
+  width: 4px;
+  height: 56px;
+  border-radius: 2px;
+  background: #2b3139;
+}
+.chat-resize:hover::after,
+.chat-resize:active::after {
+  background: #f0b90b;
+}
+
+.social-icon {
+  position: relative;
+  display: inline-flex;
+}
+.social-preview {
+  position: absolute;
+  left: 22px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 8;
+  max-width: 180px;
+  padding: 4px 7px;
+  border-radius: 6px;
+  background: #1b2028;
+  border: 1px solid #2b3139;
+  color: #eaecef;
+  font-size: 10px;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+/* ── 移动端(<900px)── */
+html, body {
+  max-width: 100vw;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+@media (max-width: 899px) {
+  /* 桌面端才显示的元素 */
+  .desktop-only {
+    display: none !important;
+  }
+  /* 移动端头部:允许换行,搜索框独占一行 */
+  .site-header {
+    flex-wrap: wrap !important;
+    row-gap: 8px !important;
+  }
+  .site-header .search-wrap {
+    order: 10;
+    flex-basis: 100% !important;
+    max-width: none !important;
+  }
+  .site-header .search-wrap > div {
+    width: 100% !important;
+    max-width: none !important;
+  }
+}

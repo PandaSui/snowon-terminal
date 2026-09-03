@@ -1,0 +1,1 @@
+{"name":"dev-services","private":true,"type":"module","dependencies":{"@electric-sql/pglite":"^0.5.8","@electric-sql/pglite-socket":"^0.2.11","drizzle-orm":"^0.45.2","embedded-postgres":"17.10.0-beta.17","postgres":"^3.4.9"}}

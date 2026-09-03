@@ -1,0 +1,25 @@
+{
+  "name": "indexer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.2.17",
+    "@terminal/adapters": "workspace:*",
+    "@terminal/db": "workspace:*",
+    "dotenv": "^16.4.5",
+    "drizzle-orm": "^0.38.0",
+    "ioredis": "^5.4.0",
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
