@@ -529,7 +529,9 @@ export class EventHandlers {
 
   /**
    * 毕业后 PoolManager Swap → trades 表(phase='pool')。
-   * amount0/amount1 为池子余额变化:报价腿进池 = 买入代币。
+   * 本链 PoolManager 的 amount0/amount1 是「调用方视角」的 delta(正 = 交易者收到),
+   * 与 V3 的池子视角相反:报价腿为负(付出报价)= 买入代币。
+   * 已对链上 Transfer 逐笔验证(2026-09-03)。
    * quote != ETH 时用 ETH/Q 池 spot 把 Q 腿换成 ETH,写入 ethAmount/priceEth。
    */
   async onPoolSwap(log: Log & { args: LogArgs }) {
@@ -555,7 +557,8 @@ export class EventHandlers {
     const tokenIsC1 = token.address.toLowerCase() > quote;
     const quoteDelta = tokenIsC1 ? a.amount0 : a.amount1;
     const tokenDelta = tokenIsC1 ? a.amount1 : a.amount0;
-    const isBuy = quoteDelta > 0n;
+    // 调用方视角:quoteDelta < 0 = 付出报价资产 = 买入
+    const isBuy = quoteDelta < 0n;
     const quoteAmount = quoteDelta > 0n ? quoteDelta : -quoteDelta;
     const tokenAmount = tokenDelta > 0n ? tokenDelta : -tokenDelta;
     if (tokenAmount === 0n) return;

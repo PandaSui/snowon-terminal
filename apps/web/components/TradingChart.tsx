@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   createChart,
   CandlestickSeries,
@@ -10,6 +11,7 @@ import {
 } from "lightweight-charts";
 import { subscribe } from "@/lib/realtime";
 import { readJson } from "@/lib/http";
+import { useQuoteUnit } from "@/lib/quoteUnit";
 import { CHART_RESOLUTIONS, RES_LOOKBACK, RES_SECONDS, type ChartResolution } from "@/lib/chartResolutions";
 
 /**
@@ -56,6 +58,27 @@ export function TradingChart({
   const [internalRes, setInternalRes] = useState<ChartResolution>("5");
   const [empty, setEmpty] = useState(false);
   const resolution = (resProp ?? internalRes) as ChartResolution;
+
+  /* 计价单位:跟随全局 ETH/USD 切换;USD 时用 ETH 汇率换算 */
+  const [unit, setUnit] = useQuoteUnit();
+  const { data: ethPrice } = useQuery({
+    queryKey: ["eth-price"],
+    queryFn: async () => {
+      const res = await fetch("/api/eth-price");
+      const body = await readJson<{ price?: number }>(res);
+      if (!res.ok || !Number.isFinite(body.price)) throw new Error("price unavailable");
+      return body;
+    },
+    refetchInterval: 15_000,
+    retry: 1,
+    enabled: unit === "usd",
+  });
+  const ethUsd = unit === "usd" && ethPrice?.price && ethPrice.price > 0 ? ethPrice.price : 0;
+  const mult = ethUsd || 1;
+  const multRef = useRef(mult);
+  multRef.current = mult;
+  /** USD 模式下等汇率就位再出图,避免先画出 ETH 价的错误刻度 */
+  const rateReady = unit === "eth" || ethUsd > 0;
 
   function setResolution(r: ChartResolution) {
     onResolutionChange?.(r);
@@ -110,6 +133,7 @@ export function TradingChart({
   const lastBarRef = useRef<Bar | null>(null);
 
   useEffect(() => {
+    if (!rateReady) return;
     let cancelled = false;
     const symbol = `${chainId}:${tokenAddress}`;
     const res = RES_SECONDS[resolution] ?? 300;
@@ -131,29 +155,30 @@ export function TradingChart({
           return;
         }
         setEmpty(false);
+        const m = multRef.current;
         seriesRef.current.setData(
           d.t.map((t, i) => ({
             time: (t + TZ_OFFSET) as UTCTimestamp,
-            open: d.o![i],
-            high: d.h![i],
-            low: d.l![i],
-            close: d.c![i],
+            open: d.o![i] * m,
+            high: d.h![i] * m,
+            low: d.l![i] * m,
+            close: d.c![i] * m,
           })),
         );
         volRef.current?.setData(
           d.t.map((t, i) => ({
             time: (t + TZ_OFFSET) as UTCTimestamp,
-            value: d.v![i],
+            value: d.v![i] * m,
             color: d.c![i] >= d.o![i] ? "rgba(14,203,129,0.4)" : "rgba(246,70,93,0.4)",
           })),
         );
         const n = d.t.length - 1;
         lastBarRef.current = {
           time: (d.t[n] + TZ_OFFSET) as UTCTimestamp,
-          open: d.o![n],
-          high: d.h![n],
-          low: d.l![n],
-          close: d.c![n],
+          open: d.o![n] * m,
+          high: d.h![n] * m,
+          low: d.l![n] * m,
+          close: d.c![n] * m,
         };
         requestAnimationFrame(() => chartRef.current?.timeScale().fitContent());
       } catch {
@@ -163,7 +188,7 @@ export function TradingChart({
 
     const off = subscribe(`price:${symbol.toLowerCase()}`, (tick) => {
       if (!seriesRef.current) return;
-      const price = Number(tick.priceEth);
+      const price = Number(tick.priceEth) * multRef.current;
       const ts = Math.floor(new Date(String(tick.ts)).getTime() / 1000);
       if (!Number.isFinite(price) || !Number.isFinite(ts)) return;
       const bucket = (Math.floor(ts / res) * res + TZ_OFFSET) as UTCTimestamp;
@@ -185,7 +210,18 @@ export function TradingChart({
       clearInterval(timer);
       off();
     };
-  }, [chainId, tokenAddress, resolution]);
+    // rateReady 仅表达"汇率是否就位",数值本身的变化(15s 刷新)不触发重载
+  }, [chainId, tokenAddress, resolution, unit, rateReady]);
+
+  // USD 模式下价格数量级变大,降低精度避免一堆尾零
+  useEffect(() => {
+    seriesRef.current?.applyOptions({
+      priceFormat:
+        unit === "usd"
+          ? { type: "price", precision: 8, minMove: 1e-8 }
+          : { type: "price", precision: 10, minMove: 1e-10 },
+    });
+  }, [unit]);
 
   return (
     <div
@@ -233,6 +269,24 @@ export function TradingChart({
             {r.label}
           </button>
         ))}
+        <button
+          type="button"
+          onClick={() => setUnit(unit === "usd" ? "eth" : "usd")}
+          title="切换计价单位"
+          style={{
+            marginLeft: "auto",
+            padding: "4px 10px",
+            fontSize: 12,
+            fontWeight: 700,
+            border: "1px solid #2b3139",
+            borderRadius: 4,
+            cursor: "pointer",
+            background: "#1c2127",
+            color: "#f0b90b",
+          }}
+        >
+          {unit === "usd" ? "$ USD" : "Ξ ETH"}
+        </button>
       </div>
       <div style={{ position: "relative", width: "100%", flex: 1, minHeight: 0 }}>
         <div ref={containerRef} style={{ width: "100%", height: "100%" }} />

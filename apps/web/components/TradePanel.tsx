@@ -93,6 +93,22 @@ export function TradePanel({
         params: [wallet.address, "latest"],
       })) as string;
       setEthBal(BigInt(raw));
+
+      // 代币余额以链上 balanceOf 为准:DB positions 只累计 indexer 追踪到的成交,
+      // 会漏掉转入/索引前买入,导致可卖持仓被低估
+      try {
+        const balHex = (await provider.request({
+          method: "eth_call",
+          params: [
+            { to: token, data: `0x70a08231${wallet.address.slice(2).toLowerCase().padStart(64, "0")}` },
+            "latest",
+          ],
+        })) as string;
+        setTokenBal(BigInt(balHex));
+        return;
+      } catch {
+        /* 链上读失败时退回 API */
+      }
       const res = await fetch(`/api/portfolio?address=${wallet.address}`);
       const rows = (await res.json()) as Array<{ tokenAddress: string; balanceWhole: string }>;
       const row = Array.isArray(rows)
