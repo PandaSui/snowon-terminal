@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { usePrivy } from "@privy-io/react-auth";
 import { useQuery } from "@tanstack/react-query";
 import { readJson } from "@/lib/http";
@@ -51,7 +52,7 @@ function shortAddr(a: string) {
 
 /* ────────────────────────── 资料卡 ────────────────────────── */
 
-function ProfileCard({ address }: { address: string }) {
+function ProfileCard({ address, readOnly }: { address: string; readOnly?: boolean }) {
   const [username, setUsername] = useState("");
   const [twitter, setTwitter] = useState("");
   const [savedAt, setSavedAt] = useState(0);
@@ -123,46 +124,54 @@ function ProfileCard({ address }: { address: string }) {
         </div>
       </div>
 
-      <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr auto", alignItems: "end" }}>
-        <label style={{ display: "grid", gap: 4, fontSize: 11, color: DIM }}>
-          用户名
-          <input
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            placeholder="给自己起个名字"
-            maxLength={24}
-            style={inputStyle}
-          />
-        </label>
-        <label style={{ display: "grid", gap: 4, fontSize: 11, color: DIM }}>
-          绑定推特(handle,不含 @)
-          <input
-            value={twitter}
-            onChange={(e) => setTwitter(e.target.value)}
-            placeholder="your_handle"
-            maxLength={32}
-            style={inputStyle}
-          />
-        </label>
-        <button
-          onClick={save}
-          disabled={saving}
-          style={{
-            padding: "8px 18px", border: 0, borderRadius: 6, cursor: "pointer",
-            background: GOLD, color: "#000", fontWeight: 700, fontSize: 13,
-            opacity: saving ? 0.6 : 1,
-          }}
-        >
-          {saving ? "保存中…" : "保存"}
-        </button>
-      </div>
-      <div style={{ marginTop: 6, fontSize: 11, minHeight: 14 }}>
-        {err && <span style={{ color: BAD }}>{err}</span>}
-        {!err && savedAt > 0 && <span style={{ color: OK }}>✓ 已保存</span>}
-        {!err && savedAt === 0 && (
-          <span style={{ color: DIM }}>推特为手动绑定(handle 直填),暂不做 OAuth 验证</span>
-        )}
-      </div>
+      {readOnly ? (
+        <div style={{ fontSize: 11, color: DIM }}>
+          正在查看 TA 的主页(只读)
+        </div>
+      ) : (
+        <>
+          <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr auto", alignItems: "end" }}>
+            <label style={{ display: "grid", gap: 4, fontSize: 11, color: DIM }}>
+              用户名
+              <input
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="给自己起个名字"
+                maxLength={24}
+                style={inputStyle}
+              />
+            </label>
+            <label style={{ display: "grid", gap: 4, fontSize: 11, color: DIM }}>
+              绑定推特(handle,不含 @)
+              <input
+                value={twitter}
+                onChange={(e) => setTwitter(e.target.value)}
+                placeholder="your_handle"
+                maxLength={32}
+                style={inputStyle}
+              />
+            </label>
+            <button
+              onClick={save}
+              disabled={saving}
+              style={{
+                padding: "8px 18px", border: 0, borderRadius: 6, cursor: "pointer",
+                background: GOLD, color: "#000", fontWeight: 700, fontSize: 13,
+                opacity: saving ? 0.6 : 1,
+              }}
+            >
+              {saving ? "保存中…" : "保存"}
+            </button>
+          </div>
+          <div style={{ marginTop: 6, fontSize: 11, minHeight: 14 }}>
+            {err && <span style={{ color: BAD }}>{err}</span>}
+            {!err && savedAt > 0 && <span style={{ color: OK }}>✓ 已保存</span>}
+            {!err && savedAt === 0 && (
+              <span style={{ color: DIM }}>推特为手动绑定(handle 直填),暂不做 OAuth 验证</span>
+            )}
+          </div>
+        </>
+      )}
     </section>
   );
 }
@@ -300,9 +309,15 @@ const navBtn: React.CSSProperties = {
 
 /* ────────────────────────── 页面 ────────────────────────── */
 
-export default function ProfilePage() {
+function ProfilePageInner() {
   const { authenticated, login, logout, user } = usePrivy();
-  const address = user?.wallet?.address?.toLowerCase();
+  const params = useSearchParams();
+  const viewParam = params.get("address")?.toLowerCase() ?? null;
+  const viewAddress = viewParam && /^0x[0-9a-f]{40}$/.test(viewParam) ? viewParam : null;
+  const ownAddress = user?.wallet?.address?.toLowerCase();
+  // ?address= 优先:看别人的主页;是自己的钱包则仍可编辑
+  const address = viewAddress ?? ownAddress;
+  const readOnly = viewAddress != null && viewAddress !== ownAddress;
 
   const { data: pnl, isFetching } = useQuery({
     queryKey: ["profile-pnl", address],
@@ -346,11 +361,11 @@ export default function ProfilePage() {
             background: GOLD, color: "#000", fontWeight: 700, fontSize: 12,
           }}
         >
-          {authenticated ? `${shortAddr(address ?? "")}` : "连接钱包"}
+          {authenticated ? `${shortAddr(ownAddress ?? "")}` : "连接钱包"}
         </button>
       </header>
 
-      {!authenticated || !address ? (
+      {!address ? (
         <div
           style={{
             background: PANEL, border: `1px solid ${BORDER}`, borderRadius: 10,
@@ -369,7 +384,7 @@ export default function ProfilePage() {
         </div>
       ) : (
         <div style={{ display: "grid", gap: 12 }}>
-          <ProfileCard address={address} />
+          <ProfileCard address={address} readOnly={readOnly} />
 
           <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}>
             <StatCard
@@ -404,5 +419,13 @@ export default function ProfilePage() {
         </div>
       )}
     </main>
+  );
+}
+
+export default function ProfilePage() {
+  return (
+    <Suspense>
+      <ProfilePageInner />
+    </Suspense>
   );
 }

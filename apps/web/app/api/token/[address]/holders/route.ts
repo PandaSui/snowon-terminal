@@ -185,6 +185,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ address
           lpQuoteWei: tokens.lpQuoteWei,
           lpLockedForever: tokens.lpLockedForever,
           quoteAsset: tokens.quoteAsset,
+          creator: tokens.creator,
         })
         .from(tokens)
         .where(and(eq(tokens.chainId, CHAIN_ID), eq(tokens.address, addr)))
@@ -299,6 +300,24 @@ export async function GET(_req: Request, { params }: { params: Promise<{ address
       holderCount: 0, totalBalance: "0", top10Balance: "0",
     };
 
+    // ── 开发者系地址:creator 本人 + 资金链两级关联(开发者出资的小号、小号再出资的二级小号) ──
+    const creator = tokRows[0]?.creator?.toLowerCase() || null;
+    let devRelated = new Set<string>();
+    if (creator) {
+      devRelated = new Set([creator]);
+      for (let hop = 0; hop < 2; hop++) {
+        const frontier = [...devRelated];
+        const rows = asRows<{ address: string }>(await db.execute(sql`
+          SELECT address FROM wallets
+          WHERE chain_id = ${CHAIN_ID} AND first_funder IN (${sql.join(frontier.map((a) => sql`${a}`), sql`, `)})
+        `));
+        const before = devRelated.size;
+        for (const r of rows) devRelated.add(r.address.toLowerCase());
+        if (devRelated.size === before) break;
+      }
+      devRelated.delete(creator); // 小号集合不含开发者本人
+    }
+
     let totalSupply = onchain.totalSupply > 0n ? onchain.totalSupply : DEFAULT_SUPPLY;
     const tracked = toWei(stats.totalBalance);
     const burned = onchain.zeroBal + onchain.deadBal;
@@ -350,6 +369,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ address
         const bal = toWei(h.balanceRaw);
         const labels = parseLabels(h.labels);
         const clusterSize = Number(h.clusterSize ?? 0);
+        const wallet = h.wallet.toLowerCase();
+        const funder = h.firstFunder?.toLowerCase() ?? null;
+        // 开发者 = 代币 creator;开发小号 = 本身在开发者资金链内,或直接出资人是开发者/小号
+        const isDev = creator != null && wallet === creator;
+        const isDevAlt = !isDev && (devRelated.has(wallet) || (funder != null && (funder === creator || devRelated.has(funder))));
         const balanceWhole = Number(h.balanceWhole);
         const costBasisEth = Number(h.costBasisEth);
         const rowPrice = h.priceEth == null ? null : Number(h.priceEth);
@@ -374,6 +398,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ address
             : null;
         return {
           wallet: h.wallet,
+          isDev,
+          isDevAlt,
           balanceWhole: h.balanceWhole,
           costBasisEth: h.costBasisEth,
           avgCostEth,
@@ -416,9 +442,29 @@ export async function GET(_req: Request, { params }: { params: Promise<{ address
     }
 
     const top10 = toWei(stats.top10Balance);
+
+    // 开发者系(开发者 + 小号)合计持仓占比
+    let devSharePct: number | null = null;
+    let devAltCount = 0;
+    if (creator) {
+      const devAddrs = [creator, ...devRelated].slice(0, 500);
+      const r = asRows<{ bal: string; n: number }>(await db.execute(sql`
+        SELECT coalesce(sum(balance), 0)::text AS bal,
+               count(*) FILTER (WHERE wallet <> ${creator})::int AS n
+        FROM positions
+        WHERE chain_id = ${CHAIN_ID} AND token_address = ${addr} AND balance > 0
+          AND wallet IN (${sql.join(devAddrs.map((a) => sql`${a}`), sql`, `)})
+      `));
+      devSharePct = pctOf(toWei(r[0]?.bal), denom);
+      devAltCount = Number(r[0]?.n ?? 0);
+    }
+
     const body = {
       holders,
       pool,
+      creator,
+      devSharePct,
+      devAltCount,
       holderCount: stats.holderCount ?? 0,
       top10Share: pctOf(top10, denom) / 100,
       totalSupplyWhole: whole(totalSupply),

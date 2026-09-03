@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { readJson } from "@/lib/http";
 import { addressUrl } from "@/lib/explorers";
@@ -10,6 +11,8 @@ const COL = "22px minmax(108px,1.3fr) 64px 78px 72px 78px minmax(88px,1fr)";
 
 interface Holder {
   wallet: string;
+  isDev?: boolean;
+  isDevAlt?: boolean;
   balanceWhole: string;
   costBasisEth: string;
   avgCostEth: string | null;
@@ -54,6 +57,9 @@ interface BurnRow {
 interface HoldersData {
   holders: Holder[];
   pool?: PoolRow | null;
+  creator?: string | null;
+  devSharePct?: number | null;
+  devAltCount?: number;
   holderCount: number;
   top10Share: number | null;
   totalSupplyWhole?: string;
@@ -116,6 +122,31 @@ function valueUsd(eth: string | null | undefined, ethUsd?: number): string {
   const n = Number(eth);
   if (!Number.isFinite(n)) return "-";
   return fmtUsdCompact(n * ethUsd);
+}
+
+function DevMark({ alt }: { alt?: boolean }) {
+  return (
+    <span
+      title={alt ? "开发小号:资金链与开发者关联(开发者或其小号出资)" : "开发者:代币创建者"}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        minWidth: 16,
+        height: 16,
+        padding: "0 3px",
+        borderRadius: 3,
+        fontSize: 10,
+        fontWeight: 800,
+        lineHeight: 1,
+        color: "#fff",
+        background: alt ? "#f0b90b" : "#b15bff",
+        flexShrink: 0,
+      }}
+    >
+      {alt ? "小号" : "开发"}
+    </span>
+  );
 }
 
 function RiskMark({ kind, title }: { kind: "phish" | "bundle"; title: string }) {
@@ -216,6 +247,14 @@ export function HoldersPanel({ address, embedded, ethUsd }: { address: string; e
           <div style={{ marginTop: 4, height: 4, borderRadius: 2, background: "#1e2329", overflow: "hidden" }}>
             <div style={{ width: `${Math.min(100, top10Pct)}%`, height: "100%", background: riskColor }} />
           </div>
+          {data?.devSharePct != null && (
+            <div style={{ display: "flex", justifyContent: "space-between", color: "#848e9c", marginTop: 6 }}>
+              <span title="代币创建者 + 其资金链关联小号(两级)的合计持仓">👨‍💻 开发者系合计{data.devAltCount ? `(${data.devAltCount} 个小号)` : ""}</span>
+              <span style={{ color: data.devSharePct > 10 ? "#f6465d" : data.devSharePct > 5 ? "#f0b90b" : "#eaecef", fontWeight: 700 }}>
+                {fmtPct(data.devSharePct)}
+              </span>
+            </div>
+          )}
         </div>
       )}
 
@@ -239,7 +278,13 @@ export function HoldersPanel({ address, embedded, ethUsd }: { address: string; e
         <span>
           <RiskMark kind="bundle" title="捆绑钱包" /> 捆绑
         </span>
-        <span>占比按代币总量</span>
+        <span>
+          <DevMark /> 开发者
+        </span>
+        <span>
+          <DevMark alt /> 开发小号
+        </span>
+        <span>点地址看主页 · 占比按代币总量</span>
       </div>
 
       {burns.length > 0 && (
@@ -335,15 +380,24 @@ export function HoldersPanel({ address, embedded, ethUsd }: { address: string; e
             >
               <span style={{ color: i < 3 ? "#f0b90b" : "#5e6673", fontWeight: 700, fontSize: 11 }}>{i + 1}</span>
               <span style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0 }}>
+                <Link
+                  href={`/profile?address=${h.wallet}`}
+                  style={{ fontFamily: "monospace", color: "#eaecef", textDecoration: "none" }}
+                  title={`${h.wallet} · 点击查看 TA 的主页`}
+                >
+                  {shortAddr(h.wallet)}
+                </Link>
                 <a
                   href={addressUrl(CHAIN_ID, h.wallet)}
                   target="_blank"
                   rel="noreferrer"
-                  style={{ fontFamily: "monospace", color: "#eaecef", textDecoration: "none" }}
-                  title={h.wallet}
+                  title="在浏览器打开"
+                  style={{ color: "#3d4450", textDecoration: "none", fontSize: 10, flexShrink: 0 }}
                 >
-                  {shortAddr(h.wallet)}
+                  ↗
                 </a>
+                {h.isDev && <DevMark />}
+                {h.isDevAlt && <DevMark alt />}
                 {h.isPhish && <RiskMark kind="phish" title="钓鱼/混币钱包" />}
                 {h.isBundle && <RiskMark kind="bundle" title={clusterTip ?? "捆绑钱包"} />}
                 {(created || active) && (
