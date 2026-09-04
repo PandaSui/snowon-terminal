@@ -288,10 +288,13 @@ export function TradingChart({
       if (!Number.isFinite(price) || !Number.isFinite(ts)) return;
       const bucket = (Math.floor(ts / res) * res + TZ_OFFSET) as UTCTimestamp;
       const last = lastBarRef.current;
+      // 新 bar 开盘价衔接上一根收盘价,与历史接口的补线逻辑一致,避免实时跳动出跳空
       const bar: Bar =
         last && last.time === bucket
           ? { ...last, high: Math.max(last.high, price), low: Math.min(last.low, price), close: price }
-          : { time: bucket, open: price, high: price, low: price, close: price };
+          : last
+            ? { time: bucket, open: last.close, high: Math.max(last.close, price), low: Math.min(last.close, price), close: price }
+            : { time: bucket, open: price, high: price, low: price, close: price };
       lastBarRef.current = bar;
       const bars = barsRef.current;
       if (bars.length && bars[bars.length - 1].time === bar.time) bars[bars.length - 1] = bar;

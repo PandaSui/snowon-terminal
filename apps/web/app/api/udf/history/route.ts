@@ -19,6 +19,7 @@ function asRows<T>(r: unknown): T[] {
  * 关键设计:trades 表对毕业前(curve 事件)和毕业后(pool Swap)统一入库,
  * price_eth 全程 ETH 计价,所以这里的聚合对毕业点天然无感——
  * 跨越毕业时刻的那根 bar 会同时含两段成交,价格连续(合约按终端价建池)。
+ * 空档周期在下方以前一收盘价补平线,保证低流动性代币的 K 线走势连续。
  */
 export async function GET(req: NextRequest) {
   try {
@@ -47,6 +48,7 @@ export async function GET(req: NextRequest) {
           FROM trades
           WHERE chain_id = ${CHAIN_ID}
             AND token_address = ${address.toLowerCase()}
+            AND price_eth > 0
             AND block_timestamp BETWEEN to_timestamp(${from}) AND to_timestamp(${to})
         ),
         ranked AS (
@@ -76,15 +78,37 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(empty);
     }
 
-    const body = {
-      s: "ok",
-      t: bars.map((b) => Number(b.t)),
-      o: bars.map((b) => Number(b.o)),
-      h: bars.map((b) => Number(b.h)),
-      l: bars.map((b) => Number(b.l)),
-      c: bars.map((b) => Number(b.c)),
-      v: bars.map((b) => Number(b.v)),
-    };
+    /*
+     * 走势衔接(低流动性代币关键):
+     * 1) 空档周期以前一收盘价补平线(o=h=l=c=prevClose, v=0),不断崖;
+     * 2) 有成交的 bar 开盘价对齐上一根收盘价(h/l 相应外延),
+     *    消除相邻 bar 之间的跳空缝隙。
+     */
+    const sparse = new Map(bars.map((b) => [Number(b.t), b]));
+    const t0 = Number(bars[0].t);
+    const tEnd = Math.floor(to / res) * res;
+    const T: number[] = [], O: number[] = [], H: number[] = [], L: number[] = [], C: number[] = [], V: number[] = [];
+    let prev = 0;
+    for (let t = t0; t <= tEnd; t += res) {
+      const b = sparse.get(t);
+      if (b) {
+        const o = Number(b.o), c = Number(b.c);
+        const open = prev > 0 ? prev : o;
+        T.push(t);
+        O.push(open);
+        H.push(Math.max(Number(b.h), open));
+        L.push(Math.min(Number(b.l), open));
+        C.push(c);
+        V.push(Number(b.v));
+        prev = c;
+      } else if (prev > 0) {
+        T.push(t);
+        O.push(prev); H.push(prev); L.push(prev); C.push(prev);
+        V.push(0);
+      }
+    }
+
+    const body = { s: "ok", t: T, o: O, h: H, l: L, c: C, v: V };
     historyCache.set(cacheKey, body);
     return NextResponse.json(body);
   } catch (e) {

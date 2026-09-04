@@ -293,7 +293,7 @@ export default function TokenPage() {
         boxSizing: "border-box",
       }}
     >
-      {/* 顶栏:logo + 主页/发现 导航 + 搜索 + AI + 资产 + 钱包链接 */}
+      {/* 顶栏:logo + 发现 导航 + 搜索 + AI + 资产 + 钱包链接 */}
       <header style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <Link href="/" style={{ textDecoration: "none", color: "inherit" }}>
           <h1 style={{ fontSize: isMobile ? 15 : 18, margin: 0, fontWeight: 800, whiteSpace: "nowrap" }}>
@@ -301,7 +301,6 @@ export default function TokenPage() {
           </h1>
         </Link>
         <nav style={{ display: "flex", gap: 14, fontSize: 13, color: "#848e9c" }}>
-          <Link href="/" style={{ color: "#848e9c", textDecoration: "none" }}>主页</Link>
           <Link href="/" style={{ color: "#848e9c", textDecoration: "none" }}>发现</Link>
           <a
             href="https://www.snowon.fun/create"

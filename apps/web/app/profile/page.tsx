@@ -342,7 +342,6 @@ function ProfilePageInner() {
           </h1>
         </Link>
         <nav style={{ display: "flex", gap: 14, fontSize: 13, color: "#848e9c" }}>
-          <Link href="/" style={{ color: "#848e9c", textDecoration: "none" }}>主页</Link>
           <a
             href="https://www.snowon.fun/create"
             target="_blank"
