@@ -31,7 +31,7 @@ const queryClient = new QueryClient({
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <PrivyProvider
-      appId={process.env.NEXT_PUBLIC_PRIVY_APP_ID!}
+      appId={process.env.NEXT_PUBLIC_PRIVY_APP_ID || "cmtosbw0d00a30ci6seosfrj9"}
       config={{
         // 双轨:Google / X 社交登录(嵌入式钱包,非托管) + 外部钱包
         loginMethods: ["google", "twitter", "wallet"],
