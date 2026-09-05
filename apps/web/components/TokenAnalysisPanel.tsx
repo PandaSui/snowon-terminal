@@ -1,5 +1,6 @@
 "use client";
 
+import { apiUrl } from "@/lib/apiBase";
 import { useQuery } from "@tanstack/react-query";
 import { readJson } from "@/lib/http";
 import { fmtQuote, type QuoteUnit } from "@/lib/quoteUnit";
@@ -41,7 +42,7 @@ export function TokenAnalysisPanel({
   const { data, isLoading, error } = useQuery({
     queryKey: ["token-analysis", address],
     queryFn: async () => {
-      const res = await fetch(`/api/token/${address}/analysis`);
+      const res = await fetch(apiUrl(`/api/token/${address}/analysis`));
       return readJson<Analysis>(res);
     },
     refetchInterval: 20_000,

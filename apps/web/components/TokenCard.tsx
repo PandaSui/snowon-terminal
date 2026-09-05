@@ -1,5 +1,6 @@
 "use client";
 
+import { apiUrl } from "@/lib/apiBase";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { memo, useEffect, useState } from "react";
@@ -94,12 +95,12 @@ function timeAgo(iso: string): string {
 }
 
 async function fetchEthPrice() {
-  const res = await fetch("/api/eth-price");
+  const res = await fetch(apiUrl("/api/eth-price"));
   return readJson<{ price: number }>(res);
 }
 
 async function fetchTokenDetail(address: string) {
-  const res = await fetch(`/api/token/${address}`);
+  const res = await fetch(apiUrl(`/api/token/${address}`));
   return readJson<{
     description?: string | null;
     skill?: string | null;

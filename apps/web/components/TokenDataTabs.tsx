@@ -1,5 +1,6 @@
 "use client";
 
+import { apiUrl } from "@/lib/apiBase";
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { readJson } from "@/lib/http";
@@ -37,7 +38,7 @@ export function TokenDataTabs({ address }: { address: string }) {
   const { data: eth } = useQuery({
     queryKey: ["eth-price"],
     queryFn: async () => {
-      const res = await fetch("/api/eth-price");
+      const res = await fetch(apiUrl("/api/eth-price"));
       return readJson<{ price: number }>(res);
     },
     staleTime: 15_000,
@@ -45,7 +46,7 @@ export function TokenDataTabs({ address }: { address: string }) {
   const { data: holdersMeta } = useQuery({
     queryKey: ["holders", address],
     queryFn: async () => {
-      const res = await fetch(`/api/token/${address}/holders`);
+      const res = await fetch(apiUrl(`/api/token/${address}/holders`));
       return readJson<{ holderCount?: number; pool?: { sharePct?: number } | null }>(res);
     },
     staleTime: 12_000,

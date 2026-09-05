@@ -1,5 +1,6 @@
 "use client";
 
+import { apiUrl } from "@/lib/apiBase";
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { readJson } from "@/lib/http";
@@ -17,7 +18,7 @@ function useEthPrice() {
   return useQuery({
     queryKey: ["eth-price"],
     queryFn: async () => {
-      const res = await fetch("/api/eth-price");
+      const res = await fetch(apiUrl("/api/eth-price"));
       const body = await readJson<EthPrice | { error?: string }>(res);
       if (!res.ok || !("price" in body) || !Number.isFinite(body.price)) throw new Error("price unavailable");
       return body;
@@ -101,7 +102,7 @@ function WalletTrackerPopup({ onClose, presetAddress }: { onClose: () => void; p
     enabled: !!selected,
     refetchInterval: 10_000,
     queryFn: async () => {
-      const res = await fetch(`/api/wallet-activity?address=${selected}`);
+      const res = await fetch(apiUrl(`/api/wallet-activity?address=${selected}`));
       const body = await readJson<WalletTrade[] | { error?: string }>(res);
       if (!res.ok || !Array.isArray(body)) throw new Error("load failed");
       return body;

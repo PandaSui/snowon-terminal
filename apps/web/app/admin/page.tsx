@@ -1,5 +1,6 @@
 "use client";
 
+import { apiUrl } from "@/lib/apiBase";
 import Link from "next/link";
 import { usePrivy } from "@privy-io/react-auth";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -152,7 +153,7 @@ function ChainCard({ chain, isAdmin }: { chain: AdminChain; isAdmin: boolean }) 
 
   const save = useMutation({
     mutationFn: async (values: Record<string, string>) => {
-      const res = await fetch("/api/admin/chains", {
+      const res = await fetch(apiUrl("/api/admin/chains"), {
         method: "PUT",
         headers: { "content-type": "application/json", "x-admin-wallet": wallet },
         body: JSON.stringify({ ...values, chainId: chain.chainId }),
@@ -262,7 +263,7 @@ function AdminsCard({ wallet, isAdmin }: { wallet: string; isAdmin: boolean }) {
 
   const add = useMutation({
     mutationFn: async (address: string) => {
-      const res = await fetch("/api/admin/admins", {
+      const res = await fetch(apiUrl("/api/admin/admins"), {
         method: "POST",
         headers: { "content-type": "application/json", "x-admin-wallet": wallet },
         body: JSON.stringify({ address }),
@@ -278,7 +279,7 @@ function AdminsCard({ wallet, isAdmin }: { wallet: string; isAdmin: boolean }) {
 
   const remove = useMutation({
     mutationFn: async (address: string) => {
-      const res = await fetch(`/api/admin/admins?address=${encodeURIComponent(address)}`, {
+      const res = await fetch(apiUrl(`/api/admin/admins?address=${encodeURIComponent(address)}`), {
         method: "DELETE",
         headers: { "x-admin-wallet": wallet },
       });
@@ -367,7 +368,7 @@ export default function AdminPage() {
   const { data, isLoading, isError, error, dataUpdatedAt } = useQuery({
     queryKey: ["admin-chains"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/chains");
+      const res = await fetch(apiUrl("/api/admin/chains"));
       const body = await readJson<ChainsResponse>(res);
       if (!res.ok) throw new Error(body.error ?? `加载失败(${res.status})`);
       return body;
@@ -377,7 +378,7 @@ export default function AdminPage() {
 
   const create = useMutation({
     mutationFn: async (values: Record<string, string>) => {
-      const res = await fetch("/api/admin/chains", {
+      const res = await fetch(apiUrl("/api/admin/chains"), {
         method: "POST",
         headers: { "content-type": "application/json", "x-admin-wallet": wallet },
         body: JSON.stringify(values),

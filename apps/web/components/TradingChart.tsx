@@ -1,5 +1,6 @@
 "use client";
 
+import { apiUrl } from "@/lib/apiBase";
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -78,7 +79,7 @@ export function TradingChart({
   const { data: ethPrice } = useQuery({
     queryKey: ["eth-price"],
     queryFn: async () => {
-      const res = await fetch("/api/eth-price");
+      const res = await fetch(apiUrl("/api/eth-price"));
       const body = await readJson<{ price?: number }>(res);
       if (!res.ok || !Number.isFinite(body.price)) throw new Error("price unavailable");
       return body;
@@ -232,7 +233,7 @@ export function TradingChart({
       const lookback = RES_LOOKBACK[resolution] ?? 14 * 86400;
       const from = Math.max(0, to - lookback);
       try {
-        const r = await fetch(`/api/udf/history?symbol=${symbol}&resolution=${resolution}&from=${from}&to=${to}`);
+        const r = await fetch(apiUrl(`/api/udf/history?symbol=${symbol}&resolution=${resolution}&from=${from}&to=${to}`));
         const d = await readJson<UdfHistory>(r);
         if (cancelled || !seriesRef.current) return;
         if (d.s !== "ok" || !d.t?.length) {

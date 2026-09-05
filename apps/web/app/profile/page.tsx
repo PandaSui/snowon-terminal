@@ -1,5 +1,6 @@
 "use client";
 
+import { apiUrl } from "@/lib/apiBase";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState } from "react";
@@ -62,7 +63,7 @@ function ProfileCard({ address, readOnly }: { address: string; readOnly?: boolea
   const { data: profile } = useQuery({
     queryKey: ["profile", address],
     queryFn: async () => {
-      const r = await fetch(`/api/profile?address=${address}`);
+      const r = await fetch(apiUrl(`/api/profile?address=${address}`));
       return readJson<Profile>(r);
     },
   });
@@ -78,7 +79,7 @@ function ProfileCard({ address, readOnly }: { address: string; readOnly?: boolea
     setSaving(true);
     setErr(null);
     try {
-      const r = await fetch("/api/profile", {
+      const r = await fetch(apiUrl("/api/profile"), {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ address, username, twitter }),
@@ -324,7 +325,7 @@ function ProfilePageInner() {
     enabled: !!address,
     refetchInterval: 60_000,
     queryFn: async () => {
-      const r = await fetch(`/api/profile/pnl?address=${address}`);
+      const r = await fetch(apiUrl(`/api/profile/pnl?address=${address}`));
       const body = await readJson<PnlData | { error?: string }>(r);
       if (!r.ok || !("pnl" in body)) throw new Error("load failed");
       return body;

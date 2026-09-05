@@ -1,5 +1,6 @@
 "use client";
 
+import { apiUrl } from "@/lib/apiBase";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { readJson } from "@/lib/http";
@@ -208,7 +209,7 @@ export function HoldersPanel({ address, embedded, ethUsd }: { address: string; e
   const { data } = useQuery({
     queryKey: ["holders", address],
     queryFn: async () => {
-      const res = await fetch(`/api/token/${address}/holders`);
+      const res = await fetch(apiUrl(`/api/token/${address}/holders`));
       return readJson<HoldersData>(res);
     },
     refetchInterval: 15_000,

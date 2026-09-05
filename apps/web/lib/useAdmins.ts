@@ -1,5 +1,6 @@
 "use client";
 
+import { apiUrl } from "@/lib/apiBase";
 import { useQuery } from "@tanstack/react-query";
 import { readJson } from "@/lib/http";
 
@@ -20,7 +21,7 @@ export function useAdmins(wallet?: string) {
   const query = useQuery({
     queryKey: ["admin-wallets"],
     queryFn: async () => {
-      const res = await fetch("/api/admin/admins");
+      const res = await fetch(apiUrl("/api/admin/admins"));
       const body = await readJson<AdminsResponse>(res);
       if (!res.ok) throw new Error(body.error ?? `加载失败(${res.status})`);
       return body.admins;

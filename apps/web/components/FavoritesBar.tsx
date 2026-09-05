@@ -1,5 +1,6 @@
 "use client";
 
+import { apiUrl } from "@/lib/apiBase";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { FAVORITES_EVENT, getFavorites } from "@/lib/favorites";
@@ -18,7 +19,7 @@ export function FavoritesBar({ tokens }: { tokens: HomeToken[] }) {
   const { data: eth } = useQuery({
     queryKey: ["eth-price"],
     queryFn: async () => {
-      const res = await fetch("/api/eth-price");
+      const res = await fetch(apiUrl("/api/eth-price"));
       return readJson<{ price: number }>(res);
     },
     staleTime: 15_000,

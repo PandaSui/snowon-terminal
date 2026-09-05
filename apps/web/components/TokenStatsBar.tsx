@@ -1,5 +1,6 @@
 "use client";
 
+import { apiUrl } from "@/lib/apiBase";
 import { useQuery } from "@tanstack/react-query";
 import { readJson } from "@/lib/http";
 import { CHART_RESOLUTIONS, type ChartResolution } from "@/lib/chartResolutions";
@@ -38,7 +39,7 @@ export function TokenStatsBar({
   const { data: s } = useQuery({
     queryKey: ["token-stats", address],
     queryFn: async () => {
-      const res = await fetch(`/api/token/${address}/stats`);
+      const res = await fetch(apiUrl(`/api/token/${address}/stats`));
       return readJson<TokenStats>(res);
     },
     refetchInterval: 10_000,
@@ -46,7 +47,7 @@ export function TokenStatsBar({
   const { data: eth } = useQuery({
     queryKey: ["eth-price"],
     queryFn: async () => {
-      const res = await fetch("/api/eth-price");
+      const res = await fetch(apiUrl("/api/eth-price"));
       return readJson<{ price: number }>(res);
     },
     staleTime: 15_000,

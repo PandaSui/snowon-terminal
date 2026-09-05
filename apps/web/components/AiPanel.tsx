@@ -1,5 +1,6 @@
 "use client";
 
+import { apiUrl } from "@/lib/apiBase";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -27,7 +28,7 @@ export function AiPanel({ tokenAddress }: { tokenAddress?: string }) {
   const { data: tokens } = useQuery({
     queryKey: ["tokens"],
     queryFn: async () => {
-      const res = await fetch("/api/tokens");
+      const res = await fetch(apiUrl("/api/tokens"));
       const body = await readJson<HomeToken[]>(res);
       return Array.isArray(body) ? body : [];
     },
@@ -90,7 +91,7 @@ function WalletAnswer({ address }: { address: string }) {
   const { data, isLoading } = useQuery({
     queryKey: ["token-analysis", address],
     queryFn: async () => {
-      const res = await fetch(`/api/token/${address}/analysis`);
+      const res = await fetch(apiUrl(`/api/token/${address}/analysis`));
       return readJson<{ rules: string[]; llm: string | null; newWalletBuyShare: number; uniqueTraders: number }>(res);
     },
   });

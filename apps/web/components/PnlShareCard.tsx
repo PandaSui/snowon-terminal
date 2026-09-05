@@ -1,5 +1,6 @@
 "use client";
 
+import { apiUrl } from "@/lib/apiBase";
 import { useState } from "react";
 import { usePrivy } from "@privy-io/react-auth";
 import { useQuery } from "@tanstack/react-query";
@@ -24,7 +25,7 @@ export function PnlShareCard({ tokenAddress, symbol }: { tokenAddress: string; s
     enabled: !!address,
     refetchInterval: 15_000,
     queryFn: async () => {
-      const res = await fetch(`/api/portfolio?address=${address}`);
+      const res = await fetch(apiUrl(`/api/portfolio?address=${address}`));
       const body = await readJson<Position[]>(res);
       return Array.isArray(body) ? body : [];
     },

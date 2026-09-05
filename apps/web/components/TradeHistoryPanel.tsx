@@ -1,5 +1,6 @@
 "use client";
 
+import { apiUrl } from "@/lib/apiBase";
 import { useMemo, useState, type FormEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { readJson } from "@/lib/http";
@@ -118,7 +119,7 @@ function WalletSheet({
   const { data, isLoading } = useQuery({
     queryKey: ["trader-stats", token, wallet],
     queryFn: async () => {
-      const res = await fetch(`/api/token/${token}/trader/${wallet}`);
+      const res = await fetch(apiUrl(`/api/token/${token}/trader/${wallet}`));
       return readJson<TraderStats>(res);
     },
   });
@@ -167,7 +168,7 @@ export function TradeHistoryPanel({
   const { data } = useQuery({
     queryKey: ["token-trades", address, windowKey, order],
     queryFn: async () => {
-      const res = await fetch(`/api/token/${address}/trades?window=${windowKey}&order=${order}&limit=200`);
+      const res = await fetch(apiUrl(`/api/token/${address}/trades?window=${windowKey}&order=${order}&limit=200`));
       return readJson<{ trades: TokenTrade[] }>(res);
     },
     refetchInterval: 5_000,

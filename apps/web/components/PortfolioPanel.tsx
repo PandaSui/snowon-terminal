@@ -1,5 +1,6 @@
 "use client";
 
+import { apiUrl } from "@/lib/apiBase";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { usePrivy } from "@privy-io/react-auth";
@@ -32,7 +33,7 @@ export function PortfolioPanel() {
     enabled: open && !!address,
     refetchInterval: 15_000,
     queryFn: async () => {
-      const res = await fetch(`/api/portfolio?address=${address}`);
+      const res = await fetch(apiUrl(`/api/portfolio?address=${address}`));
       const body = await readJson<Position[] | { error?: string }>(res);
       if (!res.ok || !Array.isArray(body)) throw new Error("load failed");
       return body;

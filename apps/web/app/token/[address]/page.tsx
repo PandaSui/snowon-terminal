@@ -1,5 +1,6 @@
 "use client";
 
+import { apiUrl } from "@/lib/apiBase";
 import Link from "next/link";
 import { usePrivy } from "@privy-io/react-auth";
 import { useQuery } from "@tanstack/react-query";
@@ -52,7 +53,7 @@ interface TokenDetail extends TokenSecurity {
 }
 
 async function fetchTokens(): Promise<HomeToken[]> {
-  const res = await fetch("/api/tokens");
+  const res = await fetch(apiUrl("/api/tokens"));
   const body = await readJson<HomeToken[] | { error?: string }>(res);
   if (!res.ok || !Array.isArray(body)) {
     throw new Error((body as { error?: string }).error ?? `load failed (${res.status})`);
@@ -179,7 +180,7 @@ export default function TokenPage() {
   const { data: token, isLoading, isError, error } = useQuery({
     queryKey: ["token", address],
     queryFn: async () => {
-      const r = await fetch(`/api/token/${address}`);
+      const r = await fetch(apiUrl(`/api/token/${address}`));
       const body = await readJson<TokenDetail>(r);
       if (r.status === 404) return { notFound: true as const };
       if (!r.ok) throw new Error(body.error ?? `load failed (${r.status})`);
@@ -198,7 +199,7 @@ export default function TokenPage() {
   const { data: eth } = useQuery({
     queryKey: ["eth-price"],
     queryFn: async () => {
-      const res = await fetch("/api/eth-price");
+      const res = await fetch(apiUrl("/api/eth-price"));
       return readJson<{ price: number }>(res);
     },
     staleTime: 15_000,
@@ -207,7 +208,7 @@ export default function TokenPage() {
   const { data: pool } = useQuery({
     queryKey: ["token-pool", address],
     queryFn: async () => {
-      const res = await fetch(`/api/token/${address}/pool`);
+      const res = await fetch(apiUrl(`/api/token/${address}/pool`));
       return readJson<{
         graduated: boolean;
         quoteIsEth?: boolean;
@@ -222,7 +223,7 @@ export default function TokenPage() {
   const { data: windowStats } = useQuery({
     queryKey: ["token-stats", address],
     queryFn: async () => {
-      const res = await fetch(`/api/token/${address}/stats`);
+      const res = await fetch(apiUrl(`/api/token/${address}/stats`));
       return readJson<{ "1D"?: { vol: string } }>(res);
     },
     enabled: !!address,

@@ -1,5 +1,6 @@
 "use client";
 
+import { apiUrl } from "@/lib/apiBase";
 import Link from "next/link";
 import { usePrivy } from "@privy-io/react-auth";
 import { useQuery } from "@tanstack/react-query";
@@ -20,7 +21,7 @@ import { useAdmins } from "@/lib/useAdmins";
 const CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? 4663);
 
 async function fetchTokens(): Promise<HomeToken[]> {
-  const res = await fetch("/api/tokens");
+  const res = await fetch(apiUrl("/api/tokens"));
   const body = await readJson<HomeToken[] | { error?: string }>(res);
   if (!res.ok || !Array.isArray(body)) {
     throw new Error((body as { error?: string }).error ?? `load failed (${res.status})`);

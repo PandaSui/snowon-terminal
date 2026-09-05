@@ -1,5 +1,6 @@
 "use client";
 
+import { apiUrl } from "@/lib/apiBase";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { parseEther, parseUnits, formatEther, type Address } from "viem";
@@ -109,7 +110,7 @@ export function TradePanel({
       } catch {
         /* 链上读失败时退回 API */
       }
-      const res = await fetch(`/api/portfolio?address=${wallet.address}`);
+      const res = await fetch(apiUrl(`/api/portfolio?address=${wallet.address}`));
       const rows = (await res.json()) as Array<{ tokenAddress: string; balanceWhole: string }>;
       const row = Array.isArray(rows)
         ? rows.find((r) => r.tokenAddress?.toLowerCase() === token.toLowerCase())
@@ -136,7 +137,7 @@ export function TradePanel({
           }
           return;
         }
-        const r = await fetch(`/api/quote?token=${token}&side=${side}&amount=${amountIn}`);
+        const r = await fetch(apiUrl(`/api/quote?token=${token}&side=${side}&amount=${amountIn}`));
         const q = (await r.json()) as { amountOut?: string; error?: string };
         if (cancelled) return;
         if (q.error || !q.amountOut) {
@@ -208,13 +209,13 @@ export function TradePanel({
     setAmount(trimAmt(amountIn));
     setStatus("报价中…");
     try {
-      const quoteRes = await fetch(`/api/quote?token=${token}&side=${nextSide}&amount=${amountIn}`);
+      const quoteRes = await fetch(apiUrl(`/api/quote?token=${token}&side=${nextSide}&amount=${amountIn}`));
       const quote = (await quoteRes.json()) as { amountOut?: string; error?: string };
       if (quote.error || !quote.amountOut) throw new Error(quote.error ?? "quote failed");
       const minOut = (BigInt(quote.amountOut) * BigInt(10_000 - slippageBps)) / 10_000n;
 
       setStatus("构造交易…");
-      const txRes = await fetch("/api/build-tx", {
+      const txRes = await fetch(apiUrl("/api/build-tx"), {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({

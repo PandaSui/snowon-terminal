@@ -1,5 +1,6 @@
 "use client";
 
+import { apiUrl } from "@/lib/apiBase";
 import { useQuery } from "@tanstack/react-query";
 import { readJson } from "@/lib/http";
 import { fmtQuote, type QuoteUnit } from "@/lib/quoteUnit";
@@ -67,7 +68,7 @@ export function PoolPairBar({ address, unit, ethUsd }: { address: string; unit: 
   const { data } = useQuery({
     queryKey: ["token-pool", address],
     queryFn: async () => {
-      const res = await fetch(`/api/token/${address}/pool`);
+      const res = await fetch(apiUrl(`/api/token/${address}/pool`));
       return readJson<PoolInfo>(res);
     },
     refetchInterval: 20_000,

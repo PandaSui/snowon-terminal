@@ -1,5 +1,6 @@
 "use client";
 
+import { apiUrl } from "@/lib/apiBase";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { readJson } from "@/lib/http";
@@ -132,7 +133,7 @@ export function SecurityPanel({ token }: { token: TokenSecurity }) {
     enabled: !!token.address,
     staleTime: 60_000,
     queryFn: async () => {
-      const r = await fetch(`/api/token/${token.address}/security`);
+      const r = await fetch(apiUrl(`/api/token/${token.address}/security`));
       return readJson<OnchainSecurity>(r);
     },
   });

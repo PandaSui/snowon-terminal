@@ -1,5 +1,6 @@
 "use client";
 
+import { apiUrl } from "@/lib/apiBase";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { readJson } from "@/lib/http";
@@ -57,7 +58,7 @@ export function SearchBox() {
     }
     timerRef.current = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+        const res = await fetch(apiUrl(`/api/search?q=${encodeURIComponent(query)}`));
         const body = await readJson<SearchResult>(res);
         setResult(body);
         setCopied(false);
