@@ -10,7 +10,7 @@ export const robinhoodChain = {
   id: Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? 4663),
   name: "Robinhood Chain",
   nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
-  rpcUrls: { default: { http: [process.env.NEXT_PUBLIC_RPC_URL ?? ""] } },
+  rpcUrls: { default: { http: [process.env.NEXT_PUBLIC_RPC_URL || "https://rpc.mainnet.chain.robinhood.com"] } },
 } as const satisfies Chain;
 
 const wagmiConfig = createConfig({
