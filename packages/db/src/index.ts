@@ -10,15 +10,22 @@ export * from "./schema.js";
 
 export type Db = PostgresJsDatabase<typeof schema> | PgliteDatabase<typeof schema>;
 
-const require = createRequire(import.meta.url);
+/**
+ * createRequire / require.resolve 必须懒执行:在模块顶层,打包器(Next.js/
+ * webpack)会把 import.meta.url 换成数字模块 ID,createRequire(number) 会抛
+ * "path must be string"。只有 pglite 本地开发路径才需要它们,按需创建即可。
+ */
+function nodeRequire(): NodeRequire {
+  return createRequire(import.meta.url);
+}
 /** 仓库根目录下的本地数据目录(PGlite 落盘位置) */
 function localDataDir(): string {
-  const pkgDir = path.dirname(require.resolve("@terminal/db/package.json"));
+  const pkgDir = path.dirname(nodeRequire().resolve("@terminal/db/package.json"));
   return path.resolve(pkgDir, "../../.data/pglite");
 }
 
 function migrationsFolder(): string {
-  const pkgDir = path.dirname(require.resolve("@terminal/db/package.json"));
+  const pkgDir = path.dirname(nodeRequire().resolve("@terminal/db/package.json"));
   return path.join(pkgDir, "migrations");
 }
 
@@ -55,8 +62,7 @@ export function createDb(databaseUrl?: string): Db {
   }
   // PGlite 单进程单实例(WASM 实例重复打开同一数据目录会锁冲突)
   if (liteInstance) return liteInstance;
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { PGlite } = require("@electric-sql/pglite") as typeof import("@electric-sql/pglite");
+  const { PGlite } = nodeRequire()("@electric-sql/pglite") as typeof import("@electric-sql/pglite");
   const client = new PGlite(localDataDir());
   const db = drizzleLite(client, { schema });
   liteReady = client.waitReady.then(() => migrateLite(db, { migrationsFolder: migrationsFolder() }));
