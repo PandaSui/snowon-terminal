@@ -6,11 +6,12 @@ import { NextResponse, type NextRequest } from "next/server";
  * (comma-separated, or "*"); when unset no CORS headers are added, which is
  * correct for same-origin dev / the all-in-one server build.
  *
- * Auth is header-based (x-admin-wallet), never cookies, so credentialed CORS
- * is not needed — an allow-listed origin echo is enough.
+ * Auth is a SIWE session token in the Authorization: Bearer header (P1),
+ * never cookies, so credentialed CORS is not needed — an allow-listed origin
+ * echo is enough. (x-admin-wallet kept for backward compat only.)
  */
 const ALLOW_METHODS = "GET, POST, PUT, DELETE, PATCH, OPTIONS";
-const ALLOW_HEADERS = "content-type, x-admin-wallet";
+const ALLOW_HEADERS = "content-type, authorization, x-admin-wallet";
 
 function resolveOrigin(reqOrigin: string | null): string | null {
   const list = (process.env.CORS_ALLOW_ORIGIN ?? "")
