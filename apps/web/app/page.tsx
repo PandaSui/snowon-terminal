@@ -113,6 +113,7 @@ export default function DiscoverPage() {
         lastError={chat.lastError}
         onSend={chat.send}
         onPin={chat.pin}
+        pinning={chat.pinning}
       />
     </section>
   );

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { usePrivy } from "@privy-io/react-auth";
+import { apiUrl } from "@/lib/apiBase";
 import type { ChatMsg, Pin } from "@/lib/useGlobalChat";
 
 interface Props {
@@ -11,17 +12,32 @@ interface Props {
   lastError: string | null;
   onSend: (content: string) => void;
   onPin: (content: string) => void;
+  pinning: boolean;
 }
 
 /**
  * 主页公共聊天室栏:
  * 消息列表 → 付费叮住行(20U/2分钟,炫彩闪烁字体上顶部轮换)→ 输入 + 发送。
  */
-export function HomeChat({ messages, pins, connected, lastError, onSend, onPin }: Props) {
+export function HomeChat({ messages, pins, connected, lastError, onSend, onPin, pinning }: Props) {
   const { authenticated, login } = usePrivy();
   const [input, setInput] = useState("");
   const [pinInput, setPinInput] = useState("");
+  const [cfg, setCfg] = useState({ price: "100", durMin: 60, max: 5 });
   const listRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    fetch(apiUrl("/api/settings"))
+      .then((r) => r.json())
+      .then((s) =>
+        setCfg({
+          price: String(s.pinPriceSnow ?? "100"),
+          durMin: Math.round((Number(s.pinDurationSec) || 3600) / 60),
+          max: Number(s.pinMax) || 5,
+        }),
+      )
+      .catch(() => {});
+  }, []);
 
   // 新消息自动滚到底
   useEffect(() => {
@@ -72,9 +88,10 @@ export function HomeChat({ messages, pins, connected, lastError, onSend, onPin }
         <input
           value={pinInput}
           onChange={(e) => setPinInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && (authenticated ? pin() : login())}
+          onKeyDown={(e) => e.key === "Enter" && !pinning && (authenticated ? pin() : login())}
           maxLength={140}
-          placeholder={authenticated ? `叮住你的消息… (${pins.length}/5)` : "登录后可付费叮住"}
+          disabled={pinning}
+          placeholder={authenticated ? `叮住你的消息… (${pins.length}/${cfg.max})` : "登录后可付费叮住"}
           style={{
             flex: 1, minWidth: 0, padding: "7px 10px", fontSize: 12,
             background: "#0b0e11", border: "1px solid #2b3139", borderRadius: 6,
@@ -83,15 +100,17 @@ export function HomeChat({ messages, pins, connected, lastError, onSend, onPin }
         />
         <button
           onClick={authenticated ? pin : login}
-          title="付费 20U,消息以炫彩字体在顶部栏轮换展示 2 分钟(最多 5 条)"
+          disabled={pinning}
+          title={`付费 ${cfg.price} SNOW,消息在顶部栏轮换展示 ${cfg.durMin} 分钟(最多 ${cfg.max} 条)`}
           style={{
-            flexShrink: 0, padding: "0 10px", border: 0, borderRadius: 6, cursor: "pointer",
+            flexShrink: 0, padding: "0 10px", border: 0, borderRadius: 6,
+            cursor: pinning ? "wait" : "pointer", opacity: pinning ? 0.6 : 1,
             background: "linear-gradient(90deg,#ff8a00,#ff004c,#b15bff)",
             backgroundSize: "200% 100%",
             color: "#fff", fontSize: 11, fontWeight: 800, whiteSpace: "nowrap",
           }}
         >
-          📌 20U·2分钟
+          {pinning ? "付款中…" : `📌 ${cfg.price} SNOW·${cfg.durMin}分钟`}
         </button>
       </div>
 

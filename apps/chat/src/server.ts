@@ -4,7 +4,8 @@ import Redis from "ioredis";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { PrivyClient } from "@privy-io/server-auth";
 import { createDb } from "@terminal/db";
-import { chatMessages, chatUsers } from "@terminal/db";
+import { chatMessages, chatUsers, getAppSettings, type AppSettings } from "@terminal/db";
+import { verifySnowPayment, snowToWei } from "./pay.js";
 import { holdingShareBps } from "./holdings.js";
 
 // Privy JWT 服务端校验:配了 PRIVY_APP_ID + PRIVY_APP_SECRET 才启用;
@@ -70,11 +71,16 @@ const lastSent = new Map<string, number>();
 // ── 付费叮住消息 ──
 // 20U/次,展示 2 分钟,每房间最多 5 条,超出挤掉最早过期的一条。
 // 存 Redis sorted set(score=过期时间戳),多实例共享;过期由清扫器移除并广播。
-// 支付校验:PIN_REQUIRE_PAYMENT=1 时要求带 payTxHash(链上验付 TODO,当前仅记录);
-// 默认 dev 模式不强制验付,前端按钮照常走完整流程。
-const PIN_TTL_MS = 120_000;
-const PIN_MAX = 5;
 const PIN_MAX_CONTENT = 140;
+
+// 付费叮住的价格/时长/上限/收款地址由管理面板配置(app_settings),缓存 30s。
+let _settingsCache: { at: number; v: AppSettings } | null = null;
+async function settings(): Promise<AppSettings> {
+  if (_settingsCache && Date.now() - _settingsCache.at < 30_000) return _settingsCache.v;
+  const v = await getAppSettings(db);
+  _settingsCache = { at: Date.now(), v };
+  return v;
+}
 
 interface Pin {
   id: string;
@@ -187,7 +193,7 @@ async function sendHistory(ctx: ClientCtx, room: string) {
 }
 
 async function handleMessage(ctx: ClientCtx, raw: string) {
-  let msg: { t: string; room?: string; content?: string; clientMsgId?: string; replyTo?: number; userId?: string; token?: string; payTxHash?: string };
+  let msg: { t: string; room?: string; content?: string; clientMsgId?: string; replyTo?: number; userId?: string; token?: string; payTxHash?: string; payer?: string };
   try {
     msg = JSON.parse(raw);
   } catch {
@@ -230,23 +236,42 @@ async function handleMessage(ctx: ClientCtx, raw: string) {
     if (!ctx.userId) return ctx.ws.send(JSON.stringify({ t: "error", message: "auth required" }));
     const content = msg.content.slice(0, PIN_MAX_CONTENT);
     if (!content.trim()) return;
-    if (process.env.PIN_REQUIRE_PAYMENT === "1" && !msg.payTxHash) {
-      return ctx.ws.send(JSON.stringify({ t: "error", message: "pin payment required (20U)" }));
+
+    const s = await settings();
+    // ── 付费校验:必须带一笔有效的 SNOW 付款交易 ──
+    if (!msg.payTxHash) {
+      return ctx.ws.send(JSON.stringify({ t: "error", message: `叮住需付费 ${s.pinPriceSnow} SNOW` }));
     }
+    // 防重放:同一 txHash 只能用一次(原子占位,验证失败再释放)
+    const txId = msg.payTxHash.toLowerCase();
+    if ((await redis.sadd("pin:usedtx", txId)) === 0) {
+      return ctx.ws.send(JSON.stringify({ t: "error", message: "该付款交易已被使用过" }));
+    }
+    const check = await verifySnowPayment({
+      txHash: msg.payTxHash,
+      payee: s.pinPayee,
+      priceWei: snowToWei(s.pinPriceSnow),
+      payer: msg.payer, // 前端传的钱包地址(userId 是 Privy id,非链上地址)
+    });
+    if (!check.ok) {
+      await redis.srem("pin:usedtx", txId);
+      return ctx.ws.send(JSON.stringify({ t: "error", message: "付款校验失败:" + (check.reason ?? "") }));
+    }
+
     const user = await db.select().from(chatUsers).where(eq(chatUsers.id, ctx.userId)).limit(1);
     const pin: Pin = {
       id: crypto.randomUUID(),
       userId: ctx.userId,
       username: user[0]?.username ?? "anon",
       content,
-      expiresAt: Date.now() + PIN_TTL_MS,
+      expiresAt: Date.now() + s.pinDurationSec * 1000,
       payTxHash: msg.payTxHash,
     };
     const key = pinsKey(msg.room);
     await redis.zadd(key, pin.expiresAt, JSON.stringify(pin));
-    // 最多 5 条:挤掉最早过期的
+    // 上限:挤掉最早过期的
     const count = await redis.zcard(key);
-    if (count > PIN_MAX) await redis.zremrangebyrank(key, 0, count - PIN_MAX - 1);
+    if (count > s.pinMax) await redis.zremrangebyrank(key, 0, count - s.pinMax - 1);
     await pushPins(msg.room);
     return;
   }
