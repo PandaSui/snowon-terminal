@@ -310,7 +310,7 @@ function TokenCardInner({ t, showMultiplier }: { t: HomeToken; showMultiplier?: 
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <span style={{ fontWeight: 800, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  ${t.symbol}
+                  {t.symbol}
                 </span>
                 {hot && (
                   <span
