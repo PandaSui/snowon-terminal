@@ -4,6 +4,7 @@ import { PrivyProvider } from "@privy-io/react-auth";
 import { WagmiProvider, createConfig, http } from "wagmi";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Chain } from "viem";
+import { TrackedWalletsProvider } from "@/lib/trackedWallets";
 
 /** Robinhood Chain(viem 尚未收录,本地声明) */
 export const robinhoodChain = {
@@ -44,7 +45,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
       }}
     >
       <QueryClientProvider client={queryClient}>
-        <WagmiProvider config={wagmiConfig}>{children}</WagmiProvider>
+        <WagmiProvider config={wagmiConfig}>
+          <TrackedWalletsProvider>{children}</TrackedWalletsProvider>
+        </WagmiProvider>
       </QueryClientProvider>
     </PrivyProvider>
   );

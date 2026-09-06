@@ -54,7 +54,7 @@ function buildRules(s: {
   return out;
 }
 
-async function llmInsight(payload: unknown): Promise<string | null> {
+async function llmInsight(payload: unknown, lang: string): Promise<string | null> {
   const key = process.env.XAI_API_KEY;
   if (!key) return null;
   try {
@@ -69,7 +69,11 @@ async function llmInsight(payload: unknown): Promise<string | null> {
           {
             role: "system",
             content:
-              "你是发射盘交易终端的风控分析助手。只用用户给出的 JSON 数字做中文结论，3-6 句。重点：新钱包、同资金来源捆绑、钓鱼/混币、买卖盘。不要编造未提供的数据，不要投资建议口吻。",
+              lang === "en"
+                ? "You are a risk analyst for a launchpad terminal. Use only the JSON numbers the user gives. Write 3-6 sentences in English. Focus on new wallets, same-funder bundles, phish/mixers, and buy/sell flow. Do not invent missing data. No investment advice."
+                : lang === "ko"
+                  ? "당신은 런치패드 단말기의 리스크 분석가입니다. 사용자가 준 JSON 숫자만 사용하세요. 한국어로 3-6문장. 신규 지갑, 동일 자금원 번들, 피싱/믹서, 매수/매도 흐름에 집중. 없는 데이터를 만들지 마세요. 투자 조언 금지."
+                  : "你是发射盘交易终端的风控分析助手。只用用户给出的 JSON 数字做中文结论，3-6 句。重点：新钱包、同资金来源捆绑、钓鱼/混币、买卖盘。不要编造未提供的数据，不要投资建议口吻。",
           },
           { role: "user", content: JSON.stringify(payload) },
         ],
@@ -86,10 +90,12 @@ async function llmInsight(payload: unknown): Promise<string | null> {
 }
 
 /** 从 trades/wallets/positions 汇总，供面板与 AI 分析。配 XAI_API_KEY 时再让模型写一段结论。 */
-export async function GET(_req: Request, { params }: { params: Promise<{ address: string }> }) {
+export async function GET(req: Request, { params }: { params: Promise<{ address: string }> }) {
   try {
     const { address } = await params;
     const addr = address.toLowerCase();
+    const langRaw = new URL(req.url).searchParams.get("lang");
+    const lang = langRaw === "en" || langRaw === "ko" ? langRaw : "zh";
 
     const [volRes, newRes, clusterRes, phishRes] = await Promise.all([
       db.execute(sql`
@@ -162,7 +168,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ address
       phishEth: num(ph?.ethWei) / 1e18,
     };
     const rules = buildRules(stats);
-    const llm = await llmInsight({ token: addr, ...stats, rules });
+    const llm = await llmInsight({ token: addr, ...stats, rules }, lang);
 
     return NextResponse.json({
       ...stats,

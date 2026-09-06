@@ -1,7 +1,5 @@
 "use client";
 
-import { addTrackedWallets } from "@/lib/trackedWallets";
-
 /** 收藏代币:localStorage + 自定义事件同步(卡片星标 ↔ 顶部收藏栏) */
 
 const LS_KEY = "favoriteTokens";
@@ -33,6 +31,5 @@ export const TRACKER_EVENT = "open-wallet-tracker";
 
 export function openWalletTracker(address: string) {
   const addr = address.toLowerCase();
-  addTrackedWallets([{ address: addr }]);
   window.dispatchEvent(new CustomEvent(TRACKER_EVENT, { detail: addr }));
 }

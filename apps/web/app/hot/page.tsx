@@ -16,6 +16,7 @@ import { useAdmins } from "@/lib/useAdmins";
 import { useIsMobile } from "@/lib/useIsMobile";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { TranslatedText } from "@/lib/useTranslated";
+import { formatTimeAgo, t as tr, useLocale } from "@/lib/locale";
 import type { HomeToken } from "@/components/TokenCard";
 
 const WINDOWS = [
@@ -58,17 +59,10 @@ function fmtUsd(ethAmt: string | null, ethUsd?: number): string {
   return `$${v.toFixed(4)}`;
 }
 
-function timeAgo(iso: string): string {
-  const t = new Date(iso.includes("T") ? iso : iso.replace(" ", "T")).getTime();
-  if (!Number.isFinite(t)) return "—";
-  const s = Math.max(1, Math.floor((Date.now() - t) / 1000));
-  if (s < 60) return `${s}秒前`;
-  if (s < 3600) return `${Math.floor(s / 60)}分钟前`;
-  if (s < 86400) return `${Math.floor(s / 3600)}小时前`;
-  return `${Math.floor(s / 86400)}天前`;
-}
+
 
 export default function HotPage() {
+  const [locale] = useLocale();
   const { login, logout, authenticated, user } = usePrivy();
   const isMobile = useIsMobile();
   const wallet = user?.wallet?.address?.toLowerCase() ?? "";
@@ -132,7 +126,7 @@ export default function HotPage() {
         </Link>
         <AppNav current="hot" />
         {isAdmin && (
-          <Link href="/admin" className="desktop-only" style={{ color: "#848e9c", textDecoration: "none", fontSize: 13 }}>管理</Link>
+          <Link href="/admin" className="desktop-only" style={{ color: "#848e9c", textDecoration: "none", fontSize: 13 }}>{tr(locale, "admin")}</Link>
         )}
         <div className="search-wrap" style={{ flex: 1, display: "flex", justifyContent: "center" }}>
           <SearchBox />
@@ -141,7 +135,7 @@ export default function HotPage() {
         <PortfolioPanel />
         <LanguageSwitcher />
         <button onClick={authenticated ? logout : login} style={btnStyle}>
-          {authenticated ? `${user?.wallet?.address?.slice(0, 6) ?? user?.email ?? ""}…` : "钱包链接"}
+          {authenticated ? `${user?.wallet?.address?.slice(0, 6) ?? user?.email ?? ""}…` : tr(locale, "wallet")}
         </button>
       </header>
 
@@ -154,8 +148,8 @@ export default function HotPage() {
         }}
       >
         <header style={{ padding: "12px 14px", borderBottom: "1px solid #1e2329", display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
-          <span style={{ fontWeight: 800, fontSize: 15 }}>🔥 热门板块</span>
-          <span style={{ fontSize: 12, color: "#5e6673" }}>阶段成交排名</span>
+          <span style={{ fontWeight: 800, fontSize: 15 }}>{tr(locale, "hotBoard")}</span>
+          <span style={{ fontSize: 12, color: "#5e6673" }}>{tr(locale, "hotSub")}</span>
           <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
             {WINDOWS.map((w) => (
               <button key={w.key} type="button" onClick={() => setWindowKey(w.key)} style={chip(windowKey === w.key)}>
@@ -165,12 +159,12 @@ export default function HotPage() {
           </div>
           <div style={{ display: "flex", gap: 4, marginLeft: "auto", flexWrap: "wrap" }}>
             {([
-              ["time", "时间"],
-              ["mcap", "市值"],
-              ["vol", "交易量"],
-            ] as const).map(([k, label]) => (
+              ["time", "sortTime"],
+              ["mcap", "sortMcap"],
+              ["vol", "sortVol"],
+            ] as const).map(([k, labelKey]) => (
               <button key={k} type="button" onClick={() => setSort(k)} style={chip(sort === k)}>
-                {label}排序
+                {tr(locale, "sortBy", { label: tr(locale, labelKey) })}
               </button>
             ))}
           </div>
@@ -188,18 +182,18 @@ export default function HotPage() {
           }}
         >
           <span>#</span>
-          <span>代币</span>
-          {!isMobile && <span style={{ textAlign: "right" }}>市值</span>}
-          <span style={{ textAlign: "right" }}>成交额</span>
-          {!isMobile && <span style={{ textAlign: "right" }}>最近成交</span>}
+          <span>{tr(locale, "token")}</span>
+          {!isMobile && <span style={{ textAlign: "right" }}>{tr(locale, "mcap")}</span>}
+          <span style={{ textAlign: "right" }}>{tr(locale, "turnover")}</span>
+          {!isMobile && <span style={{ textAlign: "right" }}>{tr(locale, "lastTrade")}</span>}
         </div>
 
         <div className="col-scroll" style={{ flex: 1, overflowY: "auto", padding: "4px 8px 12px" }}>
           {isFetching && !rows && (
-            <div style={{ color: "#5e6673", fontSize: 13, textAlign: "center", marginTop: 40 }}>加载中…</div>
+            <div style={{ color: "#5e6673", fontSize: 13, textAlign: "center", marginTop: 40 }}>{tr(locale, "loading")}</div>
           )}
           {sorted.length === 0 && !isFetching && (
-            <div style={{ color: "#5e6673", fontSize: 13, textAlign: "center", marginTop: 40 }}>该时段暂无成交</div>
+            <div style={{ color: "#5e6673", fontSize: 13, textAlign: "center", marginTop: 40 }}>{tr(locale, "noTradesWindow")}</div>
           )}
           {sorted.map((t, i) => (
             <Link
@@ -226,7 +220,7 @@ export default function HotPage() {
                   <span style={{ fontWeight: 700, fontSize: 14 }}>{t.symbol}</span>
                   <span style={{ display: "block", fontSize: 11, color: "#5e6673", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     <TranslatedText text={t.name} />
-                    {t.graduated ? " · 已毕业" : ""}
+                    {t.graduated ? ` · ${tr(locale, "graduatedTag")}` : ""}
                   </span>
                 </span>
               </span>
@@ -239,7 +233,7 @@ export default function HotPage() {
                 {fmtUsd(t.volumeEth, eth?.price)}
               </span>
               {!isMobile && (
-                <span style={{ textAlign: "right", fontSize: 12, color: "#5e6673" }}>{timeAgo(t.lastAt)}</span>
+                <span style={{ textAlign: "right", fontSize: 12, color: "#5e6673" }}>{formatTimeAgo(t.lastAt, locale)}</span>
               )}
             </Link>
           ))}

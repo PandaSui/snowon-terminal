@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import type { Pin } from "@/lib/useGlobalChat";
+import { useT } from "@/lib/locale";
+import { EmojiAvatar } from "./EmojiAvatar";
 
 const ROTATE_MS = 4_000;
 
@@ -10,6 +12,7 @@ const ROTATE_MS = 4_000;
  * 消息为炫彩闪烁字体(.pin-flash);无钉住消息时整栏隐藏。
  */
 export function PinBar({ pins }: { pins: Pin[] }) {
+  const tr = useT();
   const [idx, setIdx] = useState(0);
 
   useEffect(() => {
@@ -27,7 +30,7 @@ export function PinBar({ pins }: { pins: Pin[] }) {
           borderRadius: 10, overflow: "hidden", fontSize: 13, color: "#3d4450",
         }}
       >
-        📌 钉住消息展示区 · 付费 20U 让你的消息炫彩置顶 2 分钟
+        {tr("pinBar")}
       </div>
     );
   }
@@ -50,16 +53,18 @@ export function PinBar({ pins }: { pins: Pin[] }) {
       }}
     >
       <span style={{ flexShrink: 0, fontSize: 13, color: "#f0b90b", fontWeight: 800, letterSpacing: 1 }}>
-        📌 叮住
+        {tr("pinned")}
       </span>
       <div style={{ flex: 1, overflow: "hidden", minHeight: 36, display: "flex", alignItems: "center" }}>
         <div key={pin.id} className="pin-flip" style={{ lineHeight: 1.35 }}>
           <span className="pin-flash" style={{ fontSize: 16 }}>{pin.content}</span>
-          <span style={{ color: "#848e9c", fontSize: 12, marginLeft: 10 }}>— {pin.username}</span>
+          <span style={{ color: "#848e9c", fontSize: 12, marginLeft: 10, display: "inline-flex", alignItems: "center", gap: 4 }}>
+            — <EmojiAvatar seed={pin.userId || pin.username} size={16} /> {pin.username}
+          </span>
         </div>
       </div>
       <span style={{ flexShrink: 0, fontSize: 12, color: "#5e6673" }}>
-        {idx + 1}/{pins.length} · 剩 {remain}s
+        {tr("pinRemain", { i: idx + 1, n: pins.length, s: remain })}
       </span>
     </div>
   );

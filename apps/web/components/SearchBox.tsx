@@ -6,7 +6,9 @@ import { useRouter } from "next/navigation";
 import { readJson } from "@/lib/http";
 import { openWalletTracker } from "@/lib/favorites";
 import { TokenLogo } from "./TokenLogo";
+import { EmojiAvatar } from "./EmojiAvatar";
 import { TranslatedText } from "@/lib/useTranslated";
+import { useT } from "@/lib/locale";
 
 interface SearchToken {
   address: string;
@@ -25,6 +27,7 @@ interface SearchResult {
 
 /** 全局搜索框:代币名 / 代币合约地址 / 钱包地址 三路识别 */
 export function SearchBox() {
+  const tr = useT();
   const router = useRouter();
   const [q, setQ] = useState("");
   const [result, setResult] = useState<SearchResult | null>(null);
@@ -99,7 +102,7 @@ export function SearchBox() {
         value={q}
         onChange={(e) => onChange(e.target.value)}
         onFocus={() => result && setOpen(true)}
-        placeholder="搜索 / 代币名 / 代币合约地址 / 钱包地址"
+        placeholder={tr("searchPh")}
         style={{
           width: "100%", boxSizing: "border-box", padding: "7px 12px 7px 30px", fontSize: 12,
           background: "#10141b", border: "1px solid #2b3139", borderRadius: 8,
@@ -131,7 +134,7 @@ export function SearchBox() {
                   <span style={{ fontSize: 13, color: "#848e9c", fontWeight: 700 }}>${modalToken.symbol}</span>
                   {modalToken.graduated && (
                     <span style={{ fontSize: 10, color: "#0ecb81", fontWeight: 700, border: "1px solid rgba(14,203,129,0.4)", borderRadius: 4, padding: "1px 5px" }}>
-                      已毕业
+                      {tr("graduatedTag")}
                     </span>
                   )}
                 </div>
@@ -148,7 +151,7 @@ export function SearchBox() {
                       color: copied ? "#0ecb81" : "#848e9c",
                     }}
                   >
-                    {copied ? "✓ 已复制" : "复制"}
+                    {copied ? `✓ ${tr("copied")}` : tr("copy")}
                   </button>
                 </div>
               </div>
@@ -163,7 +166,7 @@ export function SearchBox() {
                   background: "#f0b90b", color: "#000", fontWeight: 800, fontSize: 14,
                 }}
               >
-                查看代币 →
+                {tr("viewToken")}
               </button>
               <button
                 type="button"
@@ -173,7 +176,7 @@ export function SearchBox() {
                   background: "#1c2127", border: "1px solid #2b3139", color: "#848e9c", fontWeight: 700, fontSize: 13,
                 }}
               >
-                关闭
+                {tr("close")}
               </button>
             </div>
           </div>
@@ -197,21 +200,21 @@ export function SearchBox() {
                     <b><TranslatedText text={result.tokens[0]?.name ?? ""} /></b> (${result.tokens[0]?.symbol})
                     <span style={{ color: "#5e6673", marginLeft: 8, fontFamily: "monospace" }}>{result.address}</span>
                   </span>
-                  <span style={{ marginLeft: "auto", color: "#f0b90b" }}>查看代币 →</span>
+                  <span style={{ marginLeft: "auto", color: "#f0b90b" }}>{tr("viewToken")}</span>
                 </DropItem>
               ) : (
-                <div style={{ padding: "8px 12px", color: "#5e6673" }}>该地址不是已索引的代币合约</div>
+                <div style={{ padding: "8px 12px", color: "#5e6673" }}>{tr("notIndexed")}</div>
               )}
               <DropItem onClick={() => trackWallet(result.address!)}>
-                <span>👁</span>
+                <EmojiAvatar seed={result.address!} size={22} />
                 <span style={{ fontFamily: "monospace" }}>{result.address}</span>
-                <span style={{ marginLeft: "auto", color: "#f0b90b" }}>追踪该钱包 →</span>
+                <span style={{ marginLeft: "auto", color: "#f0b90b" }}>{tr("trackThisWallet")}</span>
               </DropItem>
             </>
           )}
 
           {result.kind === "text" && result.tokens.length === 0 && (
-            <div style={{ padding: "8px 12px", color: "#5e6673" }}>没有匹配的代币</div>
+            <div style={{ padding: "8px 12px", color: "#5e6673" }}>{tr("noMatch")}</div>
           )}
           {result.kind === "text" &&
             result.tokens.map((t) => (
@@ -220,7 +223,7 @@ export function SearchBox() {
                 <span>
                   <b><TranslatedText text={t.name} /></b> <span style={{ color: "#848e9c" }}>${t.symbol}</span>
                 </span>
-                {t.graduated && <span style={{ color: "#0ecb81", fontSize: 10 }}>已毕业</span>}
+                {t.graduated && <span style={{ color: "#0ecb81", fontSize: 10 }}>{tr("graduatedTag")}</span>}
               </DropItem>
             ))}
         </div>

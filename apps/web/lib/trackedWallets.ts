@@ -1,10 +1,16 @@
 "use client";
 
-/** 用户追踪钱包:localStorage,跟着浏览器走,上限 10000。 */
+import { createContext, createElement, useCallback, useContext, useEffect, useMemo, type ReactNode } from "react";
+import { usePrivy } from "@privy-io/react-auth";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { apiUrl } from "@/lib/apiBase";
+import { readJson } from "@/lib/http";
+
+/** 每个已连接钱包自己的追踪名单,落库,上限 10000。未连接不能添加/导出。 */
 
 export const TRACK_LIMIT = 10_000;
-export const TRACKED_LS_KEY = "trackedWallets";
 export const TRACKED_CHANGED_EVENT = "tracked-wallets-changed";
+const LS_LEGACY = "trackedWallets";
 
 export interface TrackedWallet {
   address: string;
@@ -32,9 +38,27 @@ export function shortAddr(a: string) {
   return `${s.slice(0, 6)}…${s.slice(-4)}`;
 }
 
-export function loadTrackedWallets(): TrackedWallet[] {
+export type AddResult = { added: number; skipped: number; limitHit: boolean; error?: string };
+
+export type TrackedStore = {
+  owner: string | null;
+  list: TrackedWallet[];
+  loading: boolean;
+  login: () => void;
+  add: (entries: Array<{ address: string; note?: string; label?: string }>) => Promise<AddResult>;
+  patch: (address: string, patch: Partial<TrackedWallet>) => Promise<void>;
+  remove: (address: string) => Promise<void>;
+  setNote: (address: string, note: string) => Promise<void>;
+  setWatching: (address: string, watching: boolean) => Promise<boolean>;
+};
+
+const emptyResult: AddResult = { added: 0, skipped: 0, limitHit: false, error: "connect wallet" };
+
+const Ctx = createContext<TrackedStore | null>(null);
+
+function loadLegacyLocal(): TrackedWallet[] {
   try {
-    const list = JSON.parse(localStorage.getItem(TRACKED_LS_KEY) ?? "[]") as TrackedWallet[];
+    const list = JSON.parse(localStorage.getItem(LS_LEGACY) ?? "[]") as TrackedWallet[];
     if (!Array.isArray(list)) return [];
     const out: TrackedWallet[] = [];
     const seen = new Set<string>();
@@ -56,67 +80,146 @@ export function loadTrackedWallets(): TrackedWallet[] {
   }
 }
 
-export function saveTrackedWallets(next: TrackedWallet[]) {
-  const clipped = next.slice(0, TRACK_LIMIT);
-  localStorage.setItem(TRACKED_LS_KEY, JSON.stringify(clipped));
-  window.dispatchEvent(new Event(TRACKED_CHANGED_EVENT));
-}
+export function TrackedWalletsProvider({ children }: { children: ReactNode }) {
+  const { authenticated, user, login } = usePrivy();
+  const owner = authenticated ? (user?.wallet?.address?.toLowerCase() ?? null) : null;
+  const qc = useQueryClient();
+  const q = useQuery({
+    queryKey: ["tracked-wallets", owner],
+    enabled: !!owner,
+    queryFn: async () => {
+      const res = await fetch(apiUrl(`/api/track/wallets?owner=${owner}`));
+      const body = await readJson<{ wallets?: TrackedWallet[] }>(res);
+      return Array.isArray(body.wallets) ? body.wallets : [];
+    },
+  });
 
-export function addTrackedWallets(
-  entries: Array<{ address: string; note?: string; label?: string }>,
-): { added: number; skipped: number; limitHit: boolean; list: TrackedWallet[] } {
-  const list = loadTrackedWallets();
-  const by = new Map(list.map((w) => [w.address, w] as const));
-  let added = 0;
-  let skipped = 0;
-  let limitHit = false;
-  let dirty = false;
-  for (const e of entries) {
-    const address = e.address.trim().toLowerCase();
-    if (!ADDR_OK.test(address)) {
-      skipped += 1;
-      continue;
-    }
-    const exist = by.get(address);
-    if (exist) {
-      const note = e.note?.trim();
-      if (note && !exist.note) {
-        exist.note = note;
-        dirty = true;
-      }
-      skipped += 1;
-      continue;
-    }
-    if (by.size >= TRACK_LIMIT) {
-      limitHit = true;
-      skipped += 1;
-      continue;
-    }
-    by.set(address, {
-      address,
-      label: (e.label && e.label.trim()) || shortAddr(address),
-      note: e.note?.trim() ?? "",
-      watching: true,
-      addedAt: Date.now(),
-    });
-    added += 1;
-    dirty = true;
-  }
-  const next = [...by.values()];
-  if (dirty) saveTrackedWallets(next);
-  return { added, skipped, limitHit, list: next };
-}
-
-export function removeTrackedWallet(address: string) {
-  const addr = address.toLowerCase();
-  saveTrackedWallets(loadTrackedWallets().filter((w) => w.address !== addr));
-}
-
-export function patchTrackedWallet(address: string, patch: Partial<TrackedWallet>) {
-  const addr = address.toLowerCase();
-  saveTrackedWallets(
-    loadTrackedWallets().map((w) => (w.address === addr ? { ...w, ...patch, address: w.address } : w)),
+  const refresh = useCallback(
+    (wallets?: TrackedWallet[]) => {
+      if (wallets) qc.setQueryData(["tracked-wallets", owner], wallets);
+      else void qc.invalidateQueries({ queryKey: ["tracked-wallets", owner] });
+      window.dispatchEvent(new Event(TRACKED_CHANGED_EVENT));
+    },
+    [qc, owner],
   );
+
+  useEffect(() => {
+    if (!owner) return;
+    const flag = `trackedWallets.migrated.${owner}`;
+    try {
+      if (localStorage.getItem(flag)) return;
+    } catch { return; }
+    const local = loadLegacyLocal();
+    if (local.length === 0) {
+      try { localStorage.setItem(flag, "1"); } catch { /* ignore */ }
+      return;
+    }
+    void (async () => {
+      try {
+        const res = await fetch(apiUrl("/api/track/wallets"), {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            owner,
+            items: local.map((w) => ({ address: w.address, note: w.note, label: w.label, watching: w.watching })),
+          }),
+        });
+        const body = await readJson<{ wallets?: TrackedWallet[] }>(res);
+        if (Array.isArray(body.wallets)) refresh(body.wallets);
+        localStorage.setItem(flag, "1");
+      } catch { /* ignore */ }
+    })();
+  }, [owner, refresh]);
+
+  const add = useCallback(async (entries: Array<{ address: string; note?: string; label?: string }>): Promise<AddResult> => {
+    if (!owner) return emptyResult;
+    const res = await fetch(apiUrl("/api/track/wallets"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ owner, items: entries }),
+    });
+    const body = await readJson<AddResult & { wallets?: TrackedWallet[]; error?: string }>(res);
+    if (Array.isArray(body.wallets)) refresh(body.wallets);
+    return { added: body.added ?? 0, skipped: body.skipped ?? 0, limitHit: !!body.limitHit, error: body.error };
+  }, [owner, refresh]);
+
+  useEffect(() => {
+    const onTrack = (e: Event) => {
+      const addr = String((e as CustomEvent<string>).detail ?? "").toLowerCase();
+      if (!ADDR_OK.test(addr)) return;
+      if (!owner) {
+        login();
+        return;
+      }
+      void add([{ address: addr }]);
+    };
+    window.addEventListener("open-wallet-tracker", onTrack);
+    return () => window.removeEventListener("open-wallet-tracker", onTrack);
+  }, [owner, login, add]);
+
+  const patch = useCallback(async (address: string, p: Partial<TrackedWallet>) => {
+    if (!owner) return;
+    const res = await fetch(apiUrl("/api/track/wallets"), {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ owner, address, ...p }),
+    });
+    const body = await readJson<{ wallets?: TrackedWallet[] }>(res);
+    if (Array.isArray(body.wallets)) refresh(body.wallets);
+  }, [owner, refresh]);
+
+  const remove = useCallback(async (address: string) => {
+    if (!owner) return;
+    const res = await fetch(apiUrl("/api/track/wallets"), {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ owner, address }),
+    });
+    const body = await readJson<{ wallets?: TrackedWallet[] }>(res);
+    if (Array.isArray(body.wallets)) refresh(body.wallets);
+  }, [owner, refresh]);
+
+  const setNote = useCallback(async (address: string, note: string) => {
+    await patch(address, { note });
+  }, [patch]);
+
+  const setWatching = useCallback(async (address: string, watching: boolean) => {
+    if (!owner) return false;
+    await patch(address, { watching });
+    return true;
+  }, [owner, patch]);
+
+  const value = useMemo<TrackedStore>(() => ({
+    owner,
+    list: owner ? (q.data ?? []) : [],
+    loading: !!owner && q.isLoading,
+    login,
+    add,
+    patch,
+    remove,
+    setNote,
+    setWatching,
+  }), [owner, q.data, q.isLoading, login, add, patch, remove, setNote, setWatching]);
+
+  return createElement(Ctx.Provider, { value }, children);
+}
+
+export function useTrackedWallets(): TrackedStore {
+  const s = useContext(Ctx);
+  if (!s) {
+    return {
+      owner: null,
+      list: [],
+      loading: false,
+      login: () => {},
+      add: async () => emptyResult,
+      patch: async () => {},
+      remove: async () => {},
+      setNote: async () => {},
+      setWatching: async () => false,
+    };
+  }
+  return s;
 }
 
 export function parseTrackedImport(text: string): {

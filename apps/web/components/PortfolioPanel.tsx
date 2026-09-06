@@ -7,6 +7,7 @@ import { usePrivy } from "@privy-io/react-auth";
 import { useQuery } from "@tanstack/react-query";
 import { readJson } from "@/lib/http";
 import { TokenLogo } from "./TokenLogo";
+import { useT } from "@/lib/locale";
 
 interface Position {
   tokenAddress: string;
@@ -23,6 +24,7 @@ interface Position {
 
 /** 资产面板:已登录钱包的持仓估值 + 盈亏 */
 export function PortfolioPanel() {
+  const tr = useT();
   const { authenticated, login, user } = usePrivy();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -54,7 +56,7 @@ export function PortfolioPanel() {
   return (
     <div ref={ref} style={{ position: "relative" }}>
       <button onClick={() => setOpen((v) => !v)} style={hdrBtn(open)}>
-        💼 资产
+        {tr("assets")}
       </button>
       {open && (
         <div
@@ -65,7 +67,7 @@ export function PortfolioPanel() {
           }}
         >
           <div style={{ padding: "10px 12px", borderBottom: "1px solid #1e2329", fontWeight: 700 }}>
-            💼 我的资产
+            {tr("myAssets")}
             {address && (
               <span style={{ marginLeft: 8, fontSize: 11, color: "#5e6673", fontFamily: "monospace", fontWeight: 400 }}>
                 {address.slice(0, 6)}…{address.slice(-4)}
@@ -75,28 +77,28 @@ export function PortfolioPanel() {
 
           {!authenticated ? (
             <div style={{ padding: 16, textAlign: "center" }}>
-              <div style={{ color: "#5e6673", marginBottom: 10 }}>登录后查看持仓和盈亏</div>
+              <div style={{ color: "#5e6673", marginBottom: 10 }}>{tr("loginToSee")}</div>
               <button onClick={login} style={{ padding: "7px 18px", border: 0, borderRadius: 6, background: "#f0b90b", fontWeight: 700, cursor: "pointer" }}>
-                登录
+                {tr("login")}
               </button>
             </div>
           ) : (
             <>
               <div style={{ display: "flex", gap: 16, padding: "10px 12px", borderBottom: "1px solid #1e2329" }}>
                 <span style={{ color: "#848e9c" }}>
-                  持仓估值 <b style={{ color: "#eaecef" }}>{totalValue.toFixed(4)} ETH</b>
+                  {tr("posValue")} <b style={{ color: "#eaecef" }}>{totalValue.toFixed(4)} ETH</b>
                 </span>
                 <span style={{ color: "#848e9c" }}>
-                  已实现盈亏{" "}
+                  {tr("realizedPnl")}{" "}
                   <b style={{ color: totalRealized >= 0 ? "#0ecb81" : "#f6465d" }}>
                     {totalRealized >= 0 ? "+" : ""}{totalRealized.toFixed(4)} ETH
                   </b>
                 </span>
               </div>
               <div className="col-scroll" style={{ maxHeight: 320, overflowY: "auto", padding: "4px 12px 8px" }}>
-                {isFetching && !positions && <div style={{ color: "#5e6673", padding: "12px 0", textAlign: "center" }}>加载中…</div>}
+                {isFetching && !positions && <div style={{ color: "#5e6673", padding: "12px 0", textAlign: "center" }}>{tr("loading")}</div>}
                 {positions && positions.length === 0 && (
-                  <div style={{ color: "#5e6673", padding: "12px 0", textAlign: "center" }}>暂无持仓</div>
+                  <div style={{ color: "#5e6673", padding: "12px 0", textAlign: "center" }}>{tr("noPositions")}</div>
                 )}
                 {positions?.map((p) => {
                   const value = Number(p.valueEth ?? 0);
@@ -112,7 +114,7 @@ export function PortfolioPanel() {
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <b>{p.symbol ?? "?"}</b>
                         <span style={{ color: "#5e6673", marginLeft: 6, fontSize: 11 }}>
-                          {Number(p.balanceWhole).toLocaleString("en-US", { maximumFractionDigits: 0 })} 枚
+                          {tr("nPieces", { n: Number(p.balanceWhole).toLocaleString("en-US", { maximumFractionDigits: 0 }) })}
                         </span>
                       </div>
                       <div style={{ textAlign: "right" }}>
@@ -134,7 +136,7 @@ export function PortfolioPanel() {
                     color: "#f0b90b", fontWeight: 700, fontSize: 12,
                   }}
                 >
-                  个人主页 · 战绩 / 改名 / 绑推特 →
+                  {tr("profileLink")}
                 </Link>
               </div>
             </>

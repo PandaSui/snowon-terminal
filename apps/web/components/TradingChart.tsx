@@ -15,6 +15,7 @@ import { subscribe } from "@/lib/realtime";
 import { readJson } from "@/lib/http";
 import { useQuoteUnit } from "@/lib/quoteUnit";
 import { CHART_RESOLUTIONS, RES_LOOKBACK, RES_SECONDS, type ChartResolution } from "@/lib/chartResolutions";
+import { useT } from "@/lib/locale";
 
 /**
  * K 线图(lightweight-charts)。数据源 = /api/udf/history。
@@ -72,6 +73,7 @@ export function TradingChart({
   const volRef = useRef<ReturnType<IChartApi["addSeries"]> | null>(null);
   const [internalRes, setInternalRes] = useState<ChartResolution>("5");
   const [empty, setEmpty] = useState(false);
+  const tr = useT();
   const resolution = (resProp ?? internalRes) as ChartResolution;
 
   /* 计价单位:跟随全局 ETH/USD 切换;USD 时用 ETH 汇率换算 */
@@ -375,7 +377,7 @@ export function TradingChart({
         <button
           type="button"
           onClick={() => setUnit(unit === "usd" ? "eth" : "usd")}
-          title="切换计价单位"
+          title={tr("switchQuote")}
           style={{
             marginLeft: "auto",
             padding: "4px 10px",
@@ -390,8 +392,8 @@ export function TradingChart({
         >
           {unit === "usd" ? "$ USD" : "Ξ ETH"}
         </button>
-        <span style={{ fontSize: 10, color: "#3d4450", whiteSpace: "nowrap" }} title="滚轮缩放 · 拖拽平移 · 双击刻度复位">
-          滚轮缩放 · 双击复位
+        <span style={{ fontSize: 10, color: "#3d4450", whiteSpace: "nowrap" }} title={tr("scrollZoomTip")}>
+          {tr("scrollZoom")}
         </span>
       </div>
       <div style={{ position: "relative", width: "100%", flex: 1, minHeight: 0 }}>
@@ -415,7 +417,7 @@ export function TradingChart({
             onClick={(e) => e.stopPropagation()}
             onContextMenu={(e) => e.preventDefault()}
           >
-            <div style={{ fontSize: 10, color: "#5e6673", padding: "4px 10px 2px", fontWeight: 700 }}>指标</div>
+            <div style={{ fontSize: 10, color: "#5e6673", padding: "4px 10px 2px", fontWeight: 700 }}>{tr("indicators")}</div>
             {MA_PERIODS.map((p) => {
               const on = mas.includes(p);
               return (
@@ -428,7 +430,7 @@ export function TradingChart({
                   }}
                 >
                   <span style={{ color: MA_COLORS[p], width: 14, display: "inline-block" }}>{on ? "✓" : ""}</span>
-                  MA{p} 均线
+                  {tr("maLine", { p })}
                 </MenuItem>
               );
             })}
@@ -440,7 +442,7 @@ export function TradingChart({
               }}
             >
               <span style={{ color: "#848e9c", width: 14, display: "inline-block" }}>{showVol ? "✓" : ""}</span>
-              成交量 VOL
+              {tr("volumeVol")}
             </MenuItem>
             <div style={{ borderTop: "1px solid #2b3139", margin: "4px 0" }} />
             <MenuItem
@@ -450,7 +452,7 @@ export function TradingChart({
               }}
             >
               <span style={{ width: 14, display: "inline-block" }}>⟲</span>
-              重置 K 线
+              {tr("resetChart")}
             </MenuItem>
           </div>
         )}
@@ -467,7 +469,7 @@ export function TradingChart({
               pointerEvents: "none",
             }}
           >
-            暂无成交 — 第一笔交易后出图
+            {tr("noChartTrades")}
           </div>
         )}
       </div>

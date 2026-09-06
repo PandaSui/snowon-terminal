@@ -7,17 +7,15 @@ import { useQuery } from "@tanstack/react-query";
 import { readJson } from "@/lib/http";
 import { TRACKER_EVENT } from "@/lib/favorites";
 import {
-  TRACKED_CHANGED_EVENT,
   TRACK_LIMIT,
-  addTrackedWallets,
-  loadTrackedWallets,
-  patchTrackedWallet,
-  removeTrackedWallet,
   shortAddr,
+  useTrackedWallets,
   type TrackedWallet,
 } from "@/lib/trackedWallets";
 import { TRACK_SOUND_EVENT, isTrackSoundOn, playTrackBuyChime, setTrackSound, unlockTrackSound } from "@/lib/trackSound";
 import { TokenLogo } from "./TokenLogo";
+import { EmojiAvatar } from "./EmojiAvatar";
+import { useT, useLocale, formatTimeAgo } from "@/lib/locale";
 
 /* ── ETH 实时价格 ── */
 
@@ -58,38 +56,25 @@ interface WalletTrade {
   blockTimestamp: string;
 }
 
-function timeAgo(iso: string) {
-  const s = Math.max(1, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
-  if (s < 60) return `${s}秒前`;
-  if (s < 3600) return `${Math.floor(s / 60)}分钟前`;
-  if (s < 86400) return `${Math.floor(s / 3600)}小时前`;
-  return `${Math.floor(s / 86400)}天前`;
-}
-
 function WalletTrackerPopup({ onClose, presetAddress }: { onClose: () => void; presetAddress?: string | null }) {
-  const [wallets, setWallets] = useState<TrackedWallet[]>([]);
+  const tr = useT();
+  const [locale] = useLocale();
+  const tracked = useTrackedWallets();
+  const wallets = tracked.list;
   const [input, setInput] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const sync = () => setWallets(loadTrackedWallets());
-    sync();
     const onDoc = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose();
     };
-    window.addEventListener(TRACKED_CHANGED_EVENT, sync);
     document.addEventListener("mousedown", onDoc);
-    return () => {
-      window.removeEventListener(TRACKED_CHANGED_EVENT, sync);
-      document.removeEventListener("mousedown", onDoc);
-    };
+    return () => document.removeEventListener("mousedown", onDoc);
   }, [onClose]);
 
-  // 搜索框识别到钱包地址时:预填并入列选中
   useEffect(() => {
     if (!presetAddress) return;
-    setWallets(loadTrackedWallets());
     setSelected(presetAddress);
   }, [presetAddress]);
 
@@ -106,24 +91,25 @@ function WalletTrackerPopup({ onClose, presetAddress }: { onClose: () => void; p
   });
 
   function add() {
+    if (!tracked.owner) {
+      tracked.login();
+      return;
+    }
     const address = input.trim().toLowerCase();
     if (!/^0x[0-9a-f]{40}$/.test(address)) return;
     if (wallets.length >= TRACK_LIMIT && !wallets.some((w) => w.address === address)) return;
-    addTrackedWallets([{ address }]);
-    setWallets(loadTrackedWallets());
+    void tracked.add([{ address }]);
     setInput("");
     setSelected(address);
   }
 
   function remove(address: string) {
-    removeTrackedWallet(address);
-    setWallets(loadTrackedWallets());
+    void tracked.remove(address);
     if (selected === address) setSelected(null);
   }
 
   function patchWallet(address: string, patch: Partial<TrackedWallet>) {
-    patchTrackedWallet(address, patch);
-    setWallets(loadTrackedWallets());
+    void tracked.patch(address, patch);
   }
 
   const selectedWallet = wallets.find((w) => w.address === selected) ?? null;
@@ -139,9 +125,9 @@ function WalletTrackerPopup({ onClose, presetAddress }: { onClose: () => void; p
       }}
     >
       <div style={{ padding: "10px 12px", borderBottom: "1px solid #1e2329", fontWeight: 700, fontSize: 13 }}>
-        👁 钱包追踪
+        👁 {tr("walletTrack")}
         <span style={{ marginLeft: 8, fontSize: 11, color: "#5e6673", fontWeight: 400 }}>
-          追踪聪明钱/可疑地址的实时成交
+          {tr("trackSmart")}
         </span>
       </div>
 
@@ -151,7 +137,7 @@ function WalletTrackerPopup({ onClose, presetAddress }: { onClose: () => void; p
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && add()}
-          placeholder="输入钱包地址 0x…"
+          placeholder={tr("inputWallet")}
           style={{
             flex: 1, minWidth: 0, padding: "7px 10px", fontSize: 12,
             background: "#0b0e11", border: "1px solid #2b3139", borderRadius: 6,
@@ -159,13 +145,17 @@ function WalletTrackerPopup({ onClose, presetAddress }: { onClose: () => void; p
           }}
         />
         <button onClick={add} style={{ padding: "0 12px", border: 0, borderRadius: 6, background: "#f0b90b", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
-          + 追踪
+          {tr("plusTrack")}
         </button>
       </div>
 
       {/* 追踪列表 */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, padding: "8px 12px", borderBottom: "1px solid #1e2329" }}>
-        {wallets.length === 0 && <span style={{ fontSize: 12, color: "#5e6673" }}>还没有追踪任何地址</span>}
+        {wallets.length === 0 && (
+          <span style={{ fontSize: 12, color: "#5e6673" }}>
+            {tracked.owner ? tr("noTrackList") : tr("connectToTrack")}
+          </span>
+        )}
         {wallets.map((w) => (
           <span
             key={w.address}
@@ -181,14 +171,15 @@ function WalletTrackerPopup({ onClose, presetAddress }: { onClose: () => void; p
             title={w.note || w.address}
           >
             {w.watching !== false && (
-              <span style={{ width: 5, height: 5, borderRadius: 3, background: "#0ecb81" }} title="关注中" />
+              <span style={{ width: 5, height: 5, borderRadius: 3, background: "#0ecb81" }} title={tr("watching")} />
             )}
+            <EmojiAvatar seed={w.address} size={16} />
             {w.label}
             {w.note && <span style={{ color: "#5e6673", maxWidth: 90, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{w.note}</span>}
             <b
               onClick={(e) => { e.stopPropagation(); remove(w.address); }}
               style={{ cursor: "pointer", color: "#5e6673", fontWeight: 400 }}
-              title="移除"
+              title={tr("remove")}
             >
               ✕
             </b>
@@ -202,7 +193,7 @@ function WalletTrackerPopup({ onClose, presetAddress }: { onClose: () => void; p
           <input
             value={selectedWallet.label}
             onChange={(e) => patchWallet(selectedWallet.address, { label: e.target.value })}
-            placeholder="别名"
+            placeholder={tr("alias")}
             style={{
               width: 90, padding: "5px 8px", fontSize: 11,
               background: "#0b0e11", border: "1px solid #2b3139", borderRadius: 6,
@@ -212,7 +203,7 @@ function WalletTrackerPopup({ onClose, presetAddress }: { onClose: () => void; p
           <input
             value={selectedWallet.note ?? ""}
             onChange={(e) => patchWallet(selectedWallet.address, { note: e.target.value })}
-            placeholder="备注(如:聪明钱/项目方/庄家)"
+            placeholder={tr("noteSmart")}
             style={{
               flex: 1, minWidth: 0, padding: "5px 8px", fontSize: 11,
               background: "#0b0e11", border: "1px solid #2b3139", borderRadius: 6,
@@ -221,7 +212,7 @@ function WalletTrackerPopup({ onClose, presetAddress }: { onClose: () => void; p
           />
           <button
             onClick={() => patchWallet(selectedWallet.address, { watching: selectedWallet.watching === false })}
-            title={selectedWallet.watching === false ? "点击关注" : "点击取消关注"}
+            title={selectedWallet.watching === false ? tr("clickFollow") : tr("clickUnfollow")}
             style={{
               padding: "5px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap",
               border: `1px solid ${selectedWallet.watching === false ? "#2b3139" : "#0ecb81"}`,
@@ -230,27 +221,27 @@ function WalletTrackerPopup({ onClose, presetAddress }: { onClose: () => void; p
               color: selectedWallet.watching === false ? "#5e6673" : "#0ecb81",
             }}
           >
-            {selectedWallet.watching === false ? "已取关" : "关注中"}
+            {selectedWallet.watching === false ? tr("unfollowed") : tr("following")}
           </button>
         </div>
       )}
 
       {/* 选中地址的动态 */}
       <div className="col-scroll" style={{ flex: 1, overflowY: "auto", padding: "8px 12px", minHeight: 120 }}>
-        {!selected && <div style={{ fontSize: 12, color: "#5e6673", textAlign: "center", marginTop: 20 }}>点选一个地址查看它的最近成交</div>}
-        {selected && isFetching && !activity && <div style={{ fontSize: 12, color: "#5e6673", textAlign: "center", marginTop: 20 }}>加载中…</div>}
+        {!selected && <div style={{ fontSize: 12, color: "#5e6673", textAlign: "center", marginTop: 20 }}>{tr("pickAddr")}</div>}
+        {selected && isFetching && !activity && <div style={{ fontSize: 12, color: "#5e6673", textAlign: "center", marginTop: 20 }}>{tr("loading")}</div>}
         {selected && activity && activity.length === 0 && (
-          <div style={{ fontSize: 12, color: "#5e6673", textAlign: "center", marginTop: 20 }}>该地址暂无成交记录</div>
+          <div style={{ fontSize: 12, color: "#5e6673", textAlign: "center", marginTop: 20 }}>{tr("noTradesAddr")}</div>
         )}
-        {activity?.map((tr) => (
-          <div key={tr.txHash} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid #161b22", fontSize: 12 }}>
-            <TokenLogo src={tr.logoUri} alt={tr.tokenSymbol ?? "?"} size={22} />
-            <span style={{ fontWeight: 600 }}>{tr.tokenSymbol ?? shortAddr(tr.tokenAddress)}</span>
-            <span style={{ color: tr.isBuy ? "#0ecb81" : "#f6465d", fontWeight: 700 }}>
-              {tr.isBuy ? "买入" : "卖出"}
+        {activity?.map((row) => (
+          <div key={row.txHash} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid #161b22", fontSize: 12 }}>
+            <TokenLogo src={row.logoUri} alt={row.tokenSymbol ?? "?"} size={22} />
+            <span style={{ fontWeight: 600 }}>{row.tokenSymbol ?? shortAddr(row.tokenAddress)}</span>
+            <span style={{ color: row.isBuy ? "#0ecb81" : "#f6465d", fontWeight: 700 }}>
+              {row.isBuy ? tr("buy") : tr("sell")}
             </span>
-            <span style={{ color: "#848e9c" }}>{(Number(tr.ethAmount) / 1e18).toFixed(4)} ETH</span>
-            <span style={{ marginLeft: "auto", color: "#5e6673", fontSize: 11 }}>{timeAgo(tr.blockTimestamp)}</span>
+            <span style={{ color: "#848e9c" }}>{(Number(row.ethAmount) / 1e18).toFixed(4)} ETH</span>
+            <span style={{ marginLeft: "auto", color: "#5e6673", fontSize: 11 }}>{formatTimeAgo(row.blockTimestamp, locale)}</span>
           </div>
         ))}
       </div>
@@ -272,8 +263,8 @@ function tradeKey(t: WalletTrade) {
   return `${t.txHash}:${t.logIndex ?? 0}`;
 }
 
-function watchingWallets(): TrackedWallet[] {
-  return loadTrackedWallets()
+function watchingOf(list: TrackedWallet[]): TrackedWallet[] {
+  return list
     .filter((w) => w.watching !== false)
     .sort((a, b) => (b.addedAt ?? 0) - (a.addedAt ?? 0))
     .slice(0, 80);
@@ -295,26 +286,22 @@ function fmtUsd(eth: number, price?: number) {
 }
 
 function useTrackedBuyFeed() {
+  const tracked = useTrackedWallets();
   const [buys, setBuys] = useState<WalletTrade[]>([]);
   const [fresh, setFresh] = useState<WalletTrade[]>([]);
-  const [wallets, setWallets] = useState<TrackedWallet[]>([]);
   const seen = useRef(new Set<string>());
   const primed = useRef(false);
+  const watchKey = tracked.list.filter((w) => w.watching !== false).map((w) => w.address).join(",");
 
   useEffect(() => {
-    const reset = () => {
-      primed.current = false;
-      seen.current = new Set();
-    };
-    window.addEventListener(TRACKED_CHANGED_EVENT, reset);
-    return () => window.removeEventListener(TRACKED_CHANGED_EVENT, reset);
-  }, []);
+    primed.current = false;
+    seen.current = new Set();
+  }, [watchKey]);
 
   useEffect(() => {
     let stop = false;
     async function tick() {
-      const list = watchingWallets();
-      setWallets(list);
+      const list = watchingOf(tracked.list);
       if (list.length === 0) {
         setBuys([]);
         return;
@@ -341,7 +328,7 @@ function useTrackedBuyFeed() {
     void tick();
     const id = setInterval(() => void tick(), 8_000);
     return () => { stop = true; clearInterval(id); };
-  }, []);
+  }, [watchKey, tracked.list]);
 
   useEffect(() => {
     if (fresh.length === 0) return;
@@ -350,10 +337,11 @@ function useTrackedBuyFeed() {
     return () => clearTimeout(t);
   }, [fresh]);
 
-  return { buys, fresh, wallets };
+  return { buys, fresh, wallets: watchingOf(tracked.list) };
 }
 
 function TrackerAlerts({ toast, ethUsd, onClose }: { toast: BuyToast | null; ethUsd?: number; onClose: () => void }) {
+  const tr = useT();
   if (!toast) return null;
   return (
     <div
@@ -374,7 +362,7 @@ function TrackerAlerts({ toast, ethUsd, onClose }: { toast: BuyToast | null; eth
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
           <TokenLogo src={toast.logoUri} alt={toast.token} size={28} />
           <div>
-            <div style={{ fontSize: 12, color: "#848e9c" }}>{toast.label} 买入</div>
+            <div style={{ fontSize: 12, color: "#848e9c" }}>{toast.label} {tr("bought")}</div>
             <Link href={`/token/${toast.tokenAddress}`} style={{ fontSize: 16, fontWeight: 800, color: "#0ecb81", textDecoration: "none" }}>
               ${toast.token}
             </Link>
@@ -387,14 +375,14 @@ function TrackerAlerts({ toast, ethUsd, onClose }: { toast: BuyToast | null; eth
           </button>
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
-          <span style={{ color: "#848e9c" }}>额度</span>
+          <span style={{ color: "#848e9c" }}>{tr("amount")}</span>
           <span style={{ fontWeight: 800, color: "#eaecef" }}>
             {toast.amountEth.toFixed(4)} ETH
             <span style={{ marginLeft: 6, color: "#5e6673", fontWeight: 500 }}>{fmtUsd(toast.amountEth, ethUsd)}</span>
           </span>
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginTop: 4 }}>
-          <span style={{ color: "#848e9c" }}>买入市值</span>
+          <span style={{ color: "#848e9c" }}>{tr("buyMcap")}</span>
           <span style={{ fontWeight: 800, color: "#f0b90b" }}>{fmtUsd(toast.mcapEth, ethUsd)}</span>
         </div>
       </div>
@@ -403,6 +391,7 @@ function TrackerAlerts({ toast, ethUsd, onClose }: { toast: BuyToast | null; eth
 }
 
 function EthPopup({ eth, onClose }: { eth: EthPrice | undefined; onClose: () => void }) {
+  const tr = useT();
   const ref = useRef<HTMLDivElement>(null);
   const ethUp = (eth?.change24hPct ?? 0) >= 0;
   useEffect(() => {
@@ -421,7 +410,7 @@ function EthPopup({ eth, onClose }: { eth: EthPrice | undefined; onClose: () => 
         boxShadow: "0 12px 40px rgba(0,0,0,0.6)", padding: 14,
       }}
     >
-      <div style={{ fontSize: 12, color: "#5e6673", fontWeight: 700 }}>ETH 行情</div>
+      <div style={{ fontSize: 12, color: "#5e6673", fontWeight: 700 }}>{tr("ethTicker")}</div>
       <div style={{ fontSize: 22, fontWeight: 800, marginTop: 6, fontVariantNumeric: "tabular-nums" }}>
         {eth && Number.isFinite(eth.price)
           ? `$${eth.price.toLocaleString("en-US", { maximumFractionDigits: 2 })}`
@@ -439,6 +428,8 @@ function EthPopup({ eth, onClose }: { eth: EthPrice | undefined; onClose: () => 
 /* ── 底部栏:全站固定,功能均为收放弹窗 ── */
 
 export function BottomBar() {
+  const tr = useT();
+  const [locale] = useLocale();
   // ?tracker=1 可直接带着打开的钱包追踪弹窗进入(分享链接/调试)
   const [trackerOpen, setTrackerOpen] = useState(false);
   const [presetAddress, setPresetAddress] = useState<string | null>(null);
@@ -471,18 +462,8 @@ export function BottomBar() {
     return () => window.removeEventListener(TRACKER_EVENT, onTrack);
   }, []);
   const { data: eth } = useEthPrice();
-  const [walletsCount, setWalletsCount] = useState(0);
-
-  useEffect(() => {
-    const sync = () => setWalletsCount(loadTrackedWallets().filter((w) => w.watching !== false).length);
-    sync();
-    window.addEventListener(TRACKED_CHANGED_EVENT, sync);
-    const timer = setInterval(sync, 3000);
-    return () => {
-      window.removeEventListener(TRACKED_CHANGED_EVENT, sync);
-      clearInterval(timer);
-    };
-  }, []);
+  const tracked = useTrackedWallets();
+  const walletsCount = tracked.list.filter((w) => w.watching !== false).length;
 
   const [ethOpen, setEthOpen] = useState(false);
   const ethUp = (eth?.change24hPct ?? 0) >= 0;
@@ -526,7 +507,7 @@ export function BottomBar() {
           onClick={() => { setTrackerOpen((v) => !v); setEthOpen(false); }}
           style={popBtn(trackerOpen)}
         >
-          👁 钱包追踪
+          👁 {tr("walletTrack")}
           {walletsCount > 0 && (
             <span style={{ background: "#f0b90b", color: "#000", borderRadius: 8, padding: "0 6px", fontSize: 10, fontWeight: 800 }}>
               {walletsCount}
@@ -553,37 +534,40 @@ export function BottomBar() {
 
         <button
           type="button"
-          title={soundOn ? "关闭买入提示音" : "开启买入提示音"}
+          title={soundOn ? tr("soundOn") : tr("soundOff")}
           onClick={() => setTrackSound(!soundOn)}
           style={popBtn(soundOn)}
         >
           {soundOn ? "🔊" : "🔇"}
-          <span className="desktop-only">提示音</span>
+          <span className="desktop-only">{tr("sound")}</span>
         </button>
 
-        <div className="track-buy-tape" title="追踪地址买入的代币">
+        <div className="track-buy-tape" title={tr("tapeTitle")}>
           {buys.length === 0 ? (
             <span style={{ color: "#3d4450", fontSize: 11, padding: "0 6px" }}>
-              {walletsCount > 0 ? "追踪地址暂无买入" : "追踪地址买入的代币会显示在这里"}
+              {tracked.owner ? (walletsCount > 0 ? tr("noBuys") : tr("tapeHint")) : tr("tapeConnect")}
             </span>
-          ) : buys.map((t) => {
-            const key = tradeKey(t);
-            const ethAmt = Number(t.ethAmount) / 1e18;
+          ) : buys.map((trade) => {
+            const key = tradeKey(trade);
+            const ethAmt = Number(trade.ethAmount) / 1e18;
             const flash = flashIds.has(key);
             return (
               <Link
                 key={key}
-                href={`/token/${t.tokenAddress}`}
+                href={`/token/${trade.tokenAddress}`}
                 className={`track-buy-chip${flash ? " flash" : ""}`}
               >
-                <TokenLogo src={t.logoUri} alt={t.tokenSymbol ?? "?"} size={18} />
-                <span style={{ color: "#0ecb81", fontWeight: 800 }}>买入</span>
-                <span style={{ fontWeight: 800 }}>${t.tokenSymbol ?? shortAddr(t.tokenAddress)}</span>
+                <TokenLogo src={trade.logoUri} alt={trade.tokenSymbol ?? "?"} size={18} />
+                <span style={{ color: "#0ecb81", fontWeight: 800 }}>{tr("bought")}</span>
+                <span style={{ fontWeight: 800 }}>${trade.tokenSymbol ?? shortAddr(trade.tokenAddress)}</span>
                 <span style={{ color: "#848e9c", fontVariantNumeric: "tabular-nums" }}>
                   {Number.isFinite(ethAmt) ? `${ethAmt.toFixed(4)} ETH` : ""}
                 </span>
-                <span style={{ color: "#5e6673" }}>{walletLabel(wallets, t.trader)}</span>
-                <span style={{ color: "#3d4450" }}>{timeAgo(t.blockTimestamp)}</span>
+                <span style={{ color: "#5e6673", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                  {trade.trader ? <EmojiAvatar seed={trade.trader} size={14} /> : null}
+                  {walletLabel(wallets, trade.trader)}
+                </span>
+                <span style={{ color: "#3d4450" }}>{formatTimeAgo(trade.blockTimestamp, locale)}</span>
               </Link>
             );
           })}

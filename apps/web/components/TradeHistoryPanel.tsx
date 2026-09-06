@@ -7,7 +7,13 @@ import { useQuery } from "@tanstack/react-query";
 import { readJson } from "@/lib/http";
 import { addressUrl, txUrl } from "@/lib/explorers";
 import { fmtPriceUsd, fmtQuote, type QuoteUnit } from "@/lib/quoteUnit";
-import { openWalletTracker } from "@/lib/favorites";
+import { useT } from "@/lib/locale";
+import { EmojiAvatar } from "./EmojiAvatar";
+import {
+  shortAddr,
+  useTrackedWallets,
+  type TrackedWallet,
+} from "@/lib/trackedWallets";
 
 const CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? 4663);
 
@@ -46,27 +52,23 @@ interface TraderStats {
 }
 
 const KINDS = [
-  { key: "all", label: "全部" },
-  { key: "buy", label: "买入" },
-  { key: "sell", label: "卖出" },
-  { key: "add", label: "加池子" },
-  { key: "remove", label: "减池子" },
-  { key: "burn", label: "烧币" },
-  { key: "fee", label: "领费" },
+  { key: "all", label: "kindAll" },
+  { key: "buy", label: "buy" },
+  { key: "sell", label: "sell" },
+  { key: "add", label: "addLiq" },
+  { key: "remove", label: "removeLiq" },
+  { key: "burn", label: "burn" },
+  { key: "fee", label: "fee" },
 ] as const;
 
 const KIND_STYLE: Record<string, { label: string; color: string }> = {
-  buy: { label: "买入", color: "#0ecb81" },
-  sell: { label: "卖出", color: "#f6465d" },
-  add: { label: "加池子", color: "#00c3ff" },
-  remove: { label: "减池子", color: "#f0b90b" },
-  burn: { label: "烧币", color: "#ff8a00" },
-  fee: { label: "领费", color: "#b15bff" },
+  buy: { label: "buy", color: "#0ecb81" },
+  sell: { label: "sell", color: "#f6465d" },
+  add: { label: "addLiq", color: "#00c3ff" },
+  remove: { label: "removeLiq", color: "#f0b90b" },
+  burn: { label: "burn", color: "#ff8a00" },
+  fee: { label: "fee", color: "#b15bff" },
 };
-
-function shortAddr(a: string) {
-  return `${a.slice(0, 6)}…${a.slice(-4)}`;
-}
 
 function shortTx(h: string) {
   return `${h.slice(0, 8)}…${h.slice(-4)}`;
@@ -99,9 +101,9 @@ const WINDOWS = [
   { key: "1h", label: "1h" },
   { key: "4h", label: "4h" },
   { key: "24h", label: "24h" },
-  { key: "3d", label: "3天" },
-  { key: "7d", label: "7天" },
-  { key: "all", label: "全部" },
+  { key: "3d", label: "d3" },
+  { key: "7d", label: "d7" },
+  { key: "all", label: "kindAll" },
 ] as const;
 
 function fmtTokens(s: string) {
@@ -112,12 +114,61 @@ function fmtTokens(s: string) {
   return n.toLocaleString("en-US", { maximumFractionDigits: n >= 1 ? 1 : 2 });
 }
 
+/** 首次购买:一大一小双星 */
+function FirstBuyMark() {
+  return (
+    <svg width="16" height="14" viewBox="0 0 16 14" aria-hidden>
+      <polygon
+        points="6.2,0.4 7.7,4.2 11.8,4.4 8.5,7 9.6,11.1 6.2,8.9 2.8,11.1 3.9,7 0.6,4.4 4.7,4.2"
+        fill="#f0b90b"
+      />
+      <polygon
+        points="13.1,0.15 13.85,1.9 15.8,2.05 14.25,3.3 14.8,5.2 13.1,4.15 11.4,5.2 11.95,3.3 10.4,2.05 12.35,1.9"
+        fill="#ffe08a"
+        stroke="#f0b90b"
+        strokeWidth="0.35"
+      />
+    </svg>
+  );
+}
+
+/** 新钱包:绿色羽毛 */
+function NewWalletFeather() {
+  return (
+    <svg width="12" height="14" viewBox="0 0 12 14" aria-hidden>
+      <path
+        d="M3.2 12.6 C3.2 12.6 2.6 8.2 6.4 1.4 C9.6 4.6 10.4 8.8 8.2 12.2 C6.6 11.2 4.8 11.4 3.2 12.6 Z"
+        fill="#0ecb81"
+        opacity="0.22"
+      />
+      <path
+        d="M3.4 12.4 C3.6 9.2 5.2 5.2 8.8 1.2"
+        fill="none"
+        stroke="#0ecb81"
+        strokeWidth="1.25"
+        strokeLinecap="round"
+      />
+      <path
+        d="M5.2 4.2 L8.4 2.6 M4.6 6.2 L8.6 4.2 M4.2 8.2 L8.4 6 M4 10 L7.6 8"
+        fill="none"
+        stroke="#0ecb81"
+        strokeWidth="0.9"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 function WalletSheet({
-  token, wallet, ethUsd, onClose,
+  token, wallet, ethUsd, tracked, onClose,
 }: {
-  token: string; wallet: string; ethUsd?: number; onClose: () => void;
+  token: string; wallet: string; ethUsd?: number; tracked?: TrackedWallet; onClose: () => void;
 }) {
+  const tr = useT();
   const router = useRouter();
+  const store = useTrackedWallets();
+  const watching = !!tracked && tracked.watching !== false;
+  const [note, setNote] = useState(tracked?.note ?? "");
   const { data, isLoading } = useQuery({
     queryKey: ["trader-stats", token, wallet],
     queryFn: async () => {
@@ -127,28 +178,60 @@ function WalletSheet({
   });
   return (
     <div style={{ borderTop: "1px solid #2b3139", background: "#10141b", padding: "8px 10px 10px", flexShrink: 0 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+        <EmojiAvatar seed={wallet} size={18} />
         <span style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 700 }}>{shortAddr(wallet)}</span>
-        <button type="button" onClick={() => { openWalletTracker(wallet); router.push("/track"); }} style={{ fontSize: 10, color: "#f0b90b", background: "none", border: 0, cursor: "pointer" }}>追踪</button>
-        <a href={addressUrl(CHAIN_ID, wallet)} target="_blank" rel="noreferrer" style={{ fontSize: 10, color: "#5e6673" }}>浏览器</a>
+        <button
+          type="button"
+          onClick={() => { if (!store.owner) { store.login(); return; } void store.setWatching(wallet, !watching); }}
+          style={{
+            fontSize: 10, fontWeight: 700, cursor: "pointer",
+            border: `1px solid ${watching ? "#0ecb81" : "#2b3139"}`,
+            borderRadius: 4, padding: "2px 8px",
+            background: watching ? "rgba(14,203,129,0.12)" : "transparent",
+            color: watching ? "#0ecb81" : "#848e9c",
+          }}
+        >
+          {watching ? tr("following") : tr("follow")}
+        </button>
+        <button
+          type="button"
+          onClick={() => { if (!store.owner) { store.login(); return; } void store.setWatching(wallet, true); router.push("/track"); }}
+          style={{ fontSize: 10, color: "#f0b90b", background: "none", border: 0, cursor: "pointer" }}
+        >
+          {tr("trackPage")}
+        </button>
+        <a href={addressUrl(CHAIN_ID, wallet)} target="_blank" rel="noreferrer" style={{ fontSize: 10, color: "#5e6673" }}>{tr("explorer")}</a>
         <button type="button" onClick={onClose} style={{ marginLeft: "auto", background: "none", border: 0, color: "#848e9c", cursor: "pointer", fontSize: 14 }}>×</button>
       </div>
+      <input
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        onBlur={() => { if (!store.owner) { store.login(); return; } void store.setNote(wallet, note.trim()); }}
+        onKeyDown={(e) => { if (e.key === "Enter") { e.currentTarget.blur(); } }}
+        placeholder={tr("notePh")}
+        style={{
+          width: "100%", boxSizing: "border-box", marginBottom: 8,
+          padding: "5px 8px", fontSize: 11, background: "#0b0e11",
+          border: "1px solid #2b3139", borderRadius: 4, color: "#eaecef", outline: "none",
+        }}
+      />
       {isLoading || !data ? (
-        <div style={{ fontSize: 11, color: "#5e6673" }}>读取该地址成交…</div>
+        <div style={{ fontSize: 11, color: "#5e6673" }}>{tr("loadingTrader")}</div>
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, fontSize: 11 }}>
           <div>
-            <div style={{ color: "#5e6673" }}>平均买入价</div>
+            <div style={{ color: "#5e6673" }}>{tr("avgBuy")}</div>
             <div style={{ color: "#0ecb81", fontWeight: 800 }}>{fmtPriceUsd(data.avgBuyEth, ethUsd)}</div>
-            <div style={{ color: "#5e6673", fontSize: 10 }}>{data.buyCount} 笔买</div>
+            <div style={{ color: "#5e6673", fontSize: 10 }}>{tr("buysN", { n: data.buyCount })}</div>
           </div>
           <div>
-            <div style={{ color: "#5e6673" }}>平均卖出价</div>
+            <div style={{ color: "#5e6673" }}>{tr("avgSell")}</div>
             <div style={{ color: "#f6465d", fontWeight: 800 }}>{fmtPriceUsd(data.avgSellEth, ethUsd)}</div>
-            <div style={{ color: "#5e6673", fontSize: 10 }}>{data.sellCount} 笔卖</div>
+            <div style={{ color: "#5e6673", fontSize: 10 }}>{tr("sellsN", { n: data.sellCount })}</div>
           </div>
           <div>
-            <div style={{ color: "#5e6673" }}>剩余成本</div>
+            <div style={{ color: "#5e6673" }}>{tr("remainCost")}</div>
             <div style={{ color: "#eaecef", fontWeight: 700 }}>{fmtPriceUsd(data.remainCostEth, ethUsd)}</div>
           </div>
         </div>
@@ -162,11 +245,14 @@ export function TradeHistoryPanel({
 }: {
   address: string; unit: QuoteUnit; ethUsd?: number;
 }) {
+  const tr = useT();
   const [kind, setKind] = useState<string>("all");
   const [q, setQ] = useState("");
   const [windowKey, setWindowKey] = useState<string>("all");
   const [order, setOrder] = useState<"desc" | "asc">("desc");
   const [openWallet, setOpenWallet] = useState<string | null>(null);
+  const store = useTrackedWallets();
+  const trackedBy = useMemo(() => new Map(store.list.map((w) => [w.address, w] as const)), [store.list]);
   const { data } = useQuery({
     queryKey: ["token-trades", address, windowKey, order],
     queryFn: async () => {
@@ -182,10 +268,13 @@ export function TradeHistoryPanel({
     return trades.filter((t) => {
       const k = (t.kind || (t.isBuy ? "buy" : "sell")).toLowerCase();
       if (kind !== "all" && k !== kind) return false;
-      if (qq && !t.trader.toLowerCase().includes(qq)) return false;
+      if (qq) {
+        const note = trackedBy.get(t.trader.toLowerCase())?.note ?? "";
+        if (!t.trader.toLowerCase().includes(qq) && !note.toLowerCase().includes(qq)) return false;
+      }
       return true;
     });
-  }, [trades, kind, q]);
+  }, [trades, kind, q, trackedBy]);
 
   function onSearchSubmit(e: FormEvent) {
     e.preventDefault();
@@ -193,7 +282,7 @@ export function TradeHistoryPanel({
     if (/^0x[0-9a-f]{40}$/.test(qq)) setOpenWallet(qq);
   }
 
-  const col = "1.3fr 108px 52px 1fr 1fr 1fr 1fr 76px";
+  const col = "minmax(168px,1.5fr) 108px 52px 1fr 1fr 1fr 1fr 76px";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", minHeight: 0, height: "100%" }}>
@@ -210,7 +299,7 @@ export function TradeHistoryPanel({
               color: kind === k.key ? "#f0b90b" : "#848e9c",
             }}
           >
-            {k.label}
+            {tr(k.label)}
           </button>
         ))}
         <div style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
@@ -226,26 +315,26 @@ export function TradeHistoryPanel({
                 color: windowKey === w.key ? "#0b0e11" : "#848e9c",
               }}
             >
-              {w.label}
+              {tr(w.label)}
             </button>
           ))}
           <button
             type="button"
             onClick={() => setOrder((o) => (o === "desc" ? "asc" : "desc"))}
-            title={order === "desc" ? "当前最新在前，点击改为最早在前" : "当前最早在前，点击改为最新在前"}
+            title={order === "desc" ? tr("newestTip") : tr("oldestTip")}
             style={{
               padding: "3px 8px", fontSize: 10, fontWeight: 800, cursor: "pointer",
               border: "1px solid #2b3139", borderRadius: 4,
               background: "#1c1f26", color: "#f0b90b",
             }}
           >
-            {order === "desc" ? "↓ 最新" : "↑ 最早"}
+            {order === "desc" ? tr("newest") : tr("oldest")}
           </button>
           <form onSubmit={onSearchSubmit} style={{ display: "flex" }}>
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="输入地址查找钱包"
+              placeholder={tr("findWallet")}
               style={{
                 width: 140, padding: "3px 8px", fontSize: 11, background: "#0b0e11",
                 border: "1px solid #2b3139", borderRadius: 4, color: "#eaecef", outline: "none",
@@ -261,24 +350,26 @@ export function TradeHistoryPanel({
           fontSize: 10, color: "#5e6673", fontWeight: 700, borderBottom: "1px solid #1e2329", flexShrink: 0,
         }}
       >
-        <span>交易者</span>
-        <span>时间</span>
-        <span>类型</span>
-        <span>价格 $</span>
-        <span>成本 $</span>
-        <span>数量</span>
-        <span>总额 USD</span>
+        <span>{tr("trader")}</span>
+        <span>{tr("time")}</span>
+        <span>{tr("type")}</span>
+        <span>{tr("priceUsd")}</span>
+        <span>{tr("costUsd")}</span>
+        <span>{tr("qty")}</span>
+        <span>{tr("totalUsd")}</span>
         <span>TX</span>
       </div>
 
       <div className="col-scroll" style={{ flex: 1, overflowY: "auto", minHeight: 80 }}>
         {filtered.length === 0 && (
-          <div style={{ color: "#5e6673", fontSize: 12, textAlign: "center", marginTop: 24 }}>暂无成交</div>
+          <div style={{ color: "#5e6673", fontSize: 12, textAlign: "center", marginTop: 24 }}>{tr("noTrades")}</div>
         )}
         {filtered.map((t, i) => {
           const k = (t.kind || (t.isBuy ? "buy" : "sell")).toLowerCase();
           const st = KIND_STYLE[k] ?? { label: k, color: "#848e9c" };
           const isSwap = k === "buy" || k === "sell";
+          const tw = trackedBy.get(t.trader.toLowerCase());
+          const watching = !!tw && tw.watching !== false;
           return (
             <div
               key={`${t.txHash}:${t.logIndex}`}
@@ -289,13 +380,23 @@ export function TradeHistoryPanel({
               }}
             >
               <span style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0 }}>
-                {t.isNewWallet && <span title="新钱包" style={{ fontSize: 10 }}>🐣</span>}
-                {t.isBundle && <span title="捆绑" style={{ fontSize: 10 }}>🔗</span>}
-                {t.isPhish && <span title="钓鱼" style={{ fontSize: 10 }}>🎣</span>}
+                {t.isFirstBuy && (
+                  <span title={tr("firstBuy")} style={{ display: "inline-flex", flexShrink: 0 }}>
+                    <FirstBuyMark />
+                  </span>
+                )}
+                {t.isNewWallet && (
+                  <span title={tr("newWallet")} style={{ display: "inline-flex", flexShrink: 0 }}>
+                    <NewWalletFeather />
+                  </span>
+                )}
+                {t.isBundle && <span title={tr("bundle")} style={{ fontSize: 10 }}>🔗</span>}
+                {t.isPhish && <span title={tr("phish")} style={{ fontSize: 10 }}>🎣</span>}
+                <EmojiAvatar seed={t.trader} size={16} />
                 <button
                   type="button"
                   onClick={() => setOpenWallet((w) => (w === t.trader ? null : t.trader))}
-                  title="查看平均买/卖价"
+                  title={tr("viewNoteFollow")}
                   style={{
                     fontFamily: "monospace", background: "none", border: 0, padding: 0, cursor: "pointer",
                     color: openWallet === t.trader ? "#f0b90b" : "#eaecef", fontSize: 11,
@@ -304,6 +405,31 @@ export function TradeHistoryPanel({
                 >
                   {shortAddr(t.trader)}
                 </button>
+                {tw?.note ? (
+                  <span
+                    title={tw.note}
+                    style={{ color: "#f0b90b", fontSize: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 72 }}
+                  >
+                    {tw.note}
+                  </span>
+                ) : null}
+                <button
+                  type="button"
+                  title={watching ? tr("unfollowAddr") : tr("followAddr")}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (!store.owner) { store.login(); return; }
+                    void store.setWatching(t.trader, !watching);
+                  }}
+                  style={{
+                    flexShrink: 0, fontSize: 9, fontWeight: 800, cursor: "pointer",
+                    border: 0, borderRadius: 3, padding: "1px 5px",
+                    background: watching ? "rgba(14,203,129,0.16)" : "#1e2329",
+                    color: watching ? "#0ecb81" : "#5e6673",
+                  }}
+                >
+                  {watching ? tr("followed") : tr("follow")}
+                </button>
               </span>
               <span
                 title={timeAgo(t.blockTimestamp)}
@@ -311,7 +437,7 @@ export function TradeHistoryPanel({
               >
                 {fmtClock(t.blockTimestamp)}
               </span>
-              <span style={{ color: st.color, fontWeight: 800 }}>{st.label}</span>
+              <span style={{ color: st.color, fontWeight: 800 }}>{tr(st.label)}</span>
               <span style={{ color: st.color, fontVariantNumeric: "tabular-nums" }}>
                 {isSwap ? fmtPriceUsd(t.priceEth, ethUsd) : "—"}
               </span>
@@ -336,7 +462,14 @@ export function TradeHistoryPanel({
         })}
       </div>
       {openWallet && (
-        <WalletSheet token={address} wallet={openWallet} ethUsd={ethUsd} onClose={() => setOpenWallet(null)} />
+        <WalletSheet
+          key={openWallet}
+          token={address}
+          wallet={openWallet}
+          ethUsd={ethUsd}
+          tracked={trackedBy.get(openWallet.toLowerCase())}
+          onClose={() => setOpenWallet(null)}
+        />
       )}
     </div>
   );

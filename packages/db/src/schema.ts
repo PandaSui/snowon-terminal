@@ -283,6 +283,25 @@ export const userProfiles = pgTable(
   (t) => [primaryKey({ columns: [t.chainId, t.wallet] })],
 );
 
+// ──────────────────────── 用户追踪钱包 ────────────────────────
+/** 每个已连接钱包自己的追踪名单,上限由 API 卡 10000。 */
+export const trackedWallets = pgTable(
+  "tracked_wallets",
+  {
+    chainId: integer("chain_id").notNull(),
+    owner: varchar("owner", { length: 42 }).notNull(),
+    address: varchar("address", { length: 42 }).notNull(),
+    label: varchar("label", { length: 64 }),
+    note: text("note"),
+    watching: boolean("watching").notNull().default(true),
+    addedAt: timestamp("added_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.chainId, t.owner, t.address] }),
+    index("tracked_wallets_owner_idx").on(t.chainId, t.owner),
+  ],
+);
+
 // ────────────────────────── 管理员名单 ──────────────────────────
 /** env(ADMIN_WALLETS)为主管理员、不可移除;此表为可通过管理面板增删的协管员 */
 export const adminWallets = pgTable("admin_wallets", {

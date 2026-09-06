@@ -8,7 +8,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { TokenLogo } from "./TokenLogo";
 import { FAVORITES_EVENT, isFavorite, toggleFavorite } from "@/lib/favorites";
 import { readJson } from "@/lib/http";
-import { t as tr, useLocale } from "@/lib/locale";
+import { formatTimeAgo, t as tr, useLocale } from "@/lib/locale";
 import { useTranslatedTexts } from "@/lib/useTranslated";
 import { TwitterPreview } from "./TwitterPreview";
 
@@ -90,14 +90,6 @@ function fmtChange(pct: string | null): { text: string; color: string } {
   if (!Number.isFinite(v)) return { text: "-", color: "#848e9c" };
   const sign = v > 0 ? "+" : "";
   return { text: `${sign}${v.toFixed(1)}%`, color: v > 0 ? "#0ecb81" : v < 0 ? "#f6465d" : "#848e9c" };
-}
-
-function timeAgo(iso: string): string {
-  const s = Math.max(1, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
-  if (s < 60) return `${s}秒前`;
-  if (s < 3600) return `${Math.floor(s / 60)}分钟前`;
-  if (s < 86400) return `${Math.floor(s / 3600)}小时前`;
-  return `${Math.floor(s / 86400)}天前`;
 }
 
 async function fetchEthPrice() {
@@ -286,7 +278,7 @@ function TokenCardInner({ t, showMultiplier }: { t: HomeToken; showMultiplier?: 
 
         {showMultiplier && fmtMult(t.change24hPct) && (
           <span
-            title="相对 24h 起点的倍数"
+            title={tr(locale, "xMultiple")}
             style={{
               position: "absolute", top: 4, right: 32, zIndex: 2,
               fontSize: 16, fontWeight: 800, fontStyle: "italic", color: "#0ecb81",
@@ -303,7 +295,7 @@ function TokenCardInner({ t, showMultiplier }: { t: HomeToken; showMultiplier?: 
             e.stopPropagation();
             toggleFavorite(t.address);
           }}
-          title={fav ? "取消收藏" : "收藏到顶部栏"}
+          title={fav ? tr(locale, "unfav") : tr(locale, "fav")}
           style={{
             position: "absolute", top: 6, right: 8, cursor: "pointer", fontSize: 13, zIndex: 2,
             color: fav ? "#f0b90b" : "#3d4450", userSelect: "none",
@@ -322,7 +314,7 @@ function TokenCardInner({ t, showMultiplier }: { t: HomeToken; showMultiplier?: 
                 </span>
                 {hot && (
                   <span
-                    title={`🔥 热门:24h 交易量第 ${t.volRank} 名`}
+                    title={tr(locale, "hotRank", { n: t.volRank ?? 0 })}
                     style={{
                       display: "inline-flex", alignItems: "center", gap: 2, flexShrink: 0,
                       padding: "1px 6px", fontSize: 10, fontWeight: 800, lineHeight: "14px",
@@ -336,7 +328,7 @@ function TokenCardInner({ t, showMultiplier }: { t: HomeToken; showMultiplier?: 
                 {t.antiBundle && <span title="antiBundle" style={{ fontSize: 10 }}>🛡</span>}
               </div>
               <div style={{ fontSize: 11, color: "#848e9c" }}>
-                ${t.symbol} · {timeAgo(t.createdAt)}
+                ${t.symbol} · {formatTimeAgo(t.createdAt, locale)}
               </div>
             </div>
             <div style={{ textAlign: "right", paddingRight: 14 }}>
@@ -358,16 +350,16 @@ function TokenCardInner({ t, showMultiplier }: { t: HomeToken; showMultiplier?: 
           )}
 
           <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 10px", marginTop: 8 }}>
-            <Stat label="Top10" share={top10} hint="前10持有者占总量比例" />
-            <Stat label="捆绑" share={bundle} hint="同资金来源捆绑地址占比" />
-            <Stat label="钓鱼" share={phish} kind="phish" hint="钓鱼/混币钱包占总量比例" />
+            <Stat label={tr(locale, "top10")} share={top10} hint={tr(locale, "top10conc")} />
+            <Stat label={tr(locale, "bundle")} share={bundle} hint={tr(locale, "bundle")} />
+            <Stat label={tr(locale, "phish")} share={phish} kind="phish" hint={tr(locale, "phish")} />
           </div>
 
           <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 8, fontSize: 12 }}>
             <span style={{ color: "#848e9c", whiteSpace: "nowrap" }}>
               {tr(locale, "mcap")} <span style={{ color: "#eaecef", fontWeight: 700 }}>{fmtUsd(t.mcapEth, eth?.price)}</span>
             </span>
-            <span style={{ color: "#848e9c", whiteSpace: "nowrap" }} title="24小时成交量">
+            <span style={{ color: "#848e9c", whiteSpace: "nowrap" }} title={tr(locale, "vol24h")}>
               {tr(locale, "vol")} <span style={{ color: hot ? "#ff8a00" : "#eaecef", fontWeight: 700 }}>
                 {vol24 > 0 ? fmtUsd(String(vol24), eth?.price) : "-"}
               </span>

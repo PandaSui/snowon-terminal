@@ -9,11 +9,12 @@ import { HoldersPanel } from "./HoldersPanel";
 import { TradeHistoryPanel } from "./TradeHistoryPanel";
 import { TokenAnalysisPanel } from "./TokenAnalysisPanel";
 import { PoolPairBar } from "./PoolPairBar";
+import { useT } from "@/lib/locale";
 
 const TABS = [
-  { key: "trades", label: "交易" },
-  { key: "holders", label: "持有者" },
-  { key: "analysis", label: "分析" },
+  { key: "trades", labelKey: "tabTrades" },
+  { key: "holders", labelKey: "tabHolders" },
+  { key: "analysis", labelKey: "tabAnalysis" },
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
@@ -27,6 +28,7 @@ function tabFromHash(): TabKey {
 }
 
 export function TokenDataTabs({ address }: { address: string }) {
+  const tr = useT();
   const [tab, setTab] = useState<TabKey>("trades");
   useEffect(() => {
     setTab(tabFromHash());
@@ -85,7 +87,7 @@ export function TokenDataTabs({ address }: { address: string }) {
               borderBottom: `2px solid ${tab === t.key ? "#f0b90b" : "transparent"}`,
             }}
           >
-            {t.label}
+            {tr(t.labelKey)}
             {t.key === "holders" && holdersMeta?.holderCount != null && (
               <span style={{ marginLeft: 4, fontWeight: 600 }}>{holdersMeta.holderCount}</span>
             )}
@@ -97,7 +99,7 @@ export function TokenDataTabs({ address }: { address: string }) {
               key={u}
               type="button"
               onClick={() => setUnit(u)}
-              title={u === "eth" ? "用 ETH 计价" : "用美元计价"}
+              title={u === "eth" ? tr("quoteEth") : tr("quoteUsd")}
               style={{
                 padding: "3px 8px", fontSize: 10, fontWeight: 800, cursor: "pointer",
                 border: "1px solid #2b3139",

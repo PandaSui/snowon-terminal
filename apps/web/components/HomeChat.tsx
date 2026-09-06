@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { usePrivy } from "@privy-io/react-auth";
 import type { ChatMsg, Pin } from "@/lib/useGlobalChat";
 import { EmojiPicker } from "./EmojiPicker";
+import { EmojiAvatar } from "./EmojiAvatar";
+import { useT } from "@/lib/locale";
 
 interface Props {
   messages: ChatMsg[];
@@ -19,6 +21,7 @@ interface Props {
  * 消息列表 → 付费叮住行(20U/2分钟,炫彩闪烁字体上顶部轮换)→ 输入 + 发送。
  */
 export function HomeChat({ messages, pins, connected, lastError, onSend, onPin }: Props) {
+  const tr = useT();
   const { authenticated, login } = usePrivy();
   const [input, setInput] = useState("");
   const [pinInput, setPinInput] = useState("");
@@ -48,18 +51,21 @@ export function HomeChat({ messages, pins, connected, lastError, onSend, onPin }
       <div ref={listRef} className="col-scroll" style={{ flex: 1, overflowY: "auto", padding: "8px 10px", fontSize: 12, minHeight: 0 }}>
         {messages.length === 0 && (
           <div style={{ color: "#5e6673", textAlign: "center", marginTop: 24 }}>
-            {connected ? "还没有消息,来说第一句吧" : "连接中…"}
+            {connected ? tr("noMessages") : tr("connecting")}
           </div>
         )}
         {messages.map((m) => (
-          <div key={m.id} style={{ marginBottom: 6, lineHeight: 1.5 }}>
+          <div key={m.id} style={{ marginBottom: 6, lineHeight: 1.5, display: "flex", alignItems: "flex-start", gap: 6 }}>
+            <EmojiAvatar seed={m.userId || m.username} size={16} />
+            <span style={{ minWidth: 0 }}>
             <span style={{ color: "#f0b90b", fontWeight: 600 }}>{m.username}</span>
             {m.holdingShareBps != null && m.holdingShareBps > 0 && (
               <span style={{ marginLeft: 4, fontSize: 10, color: "#0ecb81" }}>
-                持仓 {(m.holdingShareBps / 100).toFixed(2)}%
+                {tr("holdShare", { pct: (m.holdingShareBps / 100).toFixed(2) })}
               </span>
             )}
             <span style={{ marginLeft: 6, wordBreak: "break-word" }}>{m.content}</span>
+            </span>
           </div>
         ))}
       </div>
@@ -75,7 +81,7 @@ export function HomeChat({ messages, pins, connected, lastError, onSend, onPin }
           onChange={(e) => setPinInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && (authenticated ? pin() : login())}
           maxLength={140}
-          placeholder={authenticated ? `叮住你的消息… (${pins.length}/5)` : "登录后可付费叮住"}
+          placeholder={authenticated ? tr("pinPh", { n: pins.length }) : tr("pinLogin")}
           style={{
             flex: 1, minWidth: 0, padding: "7px 10px", fontSize: 12,
             background: "#0b0e11", border: "1px solid #2b3139", borderRadius: 6,
@@ -84,7 +90,7 @@ export function HomeChat({ messages, pins, connected, lastError, onSend, onPin }
         />
         <button
           onClick={authenticated ? pin : login}
-          title="付费 20U,消息以炫彩字体在顶部栏轮换展示 2 分钟(最多 5 条)"
+          title={tr("pinTip")}
           style={{
             flexShrink: 0, padding: "0 10px", border: 0, borderRadius: 6, cursor: "pointer",
             background: "linear-gradient(90deg,#ff8a00,#ff004c,#b15bff)",
@@ -92,7 +98,7 @@ export function HomeChat({ messages, pins, connected, lastError, onSend, onPin }
             color: "#fff", fontSize: 11, fontWeight: 800, whiteSpace: "nowrap",
           }}
         >
-          📌 20U·2分钟
+          {tr("pinBtn")}
         </button>
       </div>
 
@@ -102,7 +108,7 @@ export function HomeChat({ messages, pins, connected, lastError, onSend, onPin }
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && (authenticated ? send() : login())}
-          placeholder={authenticated ? "说点什么… 😊" : "登录后参与聊天"}
+          placeholder={authenticated ? tr("chatPh") : tr("chatLoginLong")}
           style={{
             flex: 1, minWidth: 0, padding: "10px 12px", fontSize: 12,
             background: "transparent", border: 0, color: "#fff", outline: "none",
@@ -116,7 +122,7 @@ export function HomeChat({ messages, pins, connected, lastError, onSend, onPin }
             background: "#f0b90b", fontWeight: 700, fontSize: 12,
           }}
         >
-          发送
+          {tr("send")}
         </button>
       </div>
     </div>

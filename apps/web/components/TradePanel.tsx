@@ -1,14 +1,15 @@
 "use client";
 
 import { apiUrl } from "@/lib/apiBase";
+import { useT } from "@/lib/locale";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { parseEther, parseUnits, formatEther, type Address } from "viem";
 
 const GAS_PRESETS = [
-  { key: "standard", label: "标准", mult: 1 },
-  { key: "fast", label: "快速", mult: 1.2 },
-  { key: "turbo", label: "极速", mult: 1.5 },
+  { key: "standard", label: "gasStd", mult: 1 },
+  { key: "fast", label: "gasFast", mult: 1.2 },
+  { key: "turbo", label: "gasTurbo", mult: 1.5 },
 ] as const;
 
 const DEFAULT_SELL_PCTS = [10, 25, 50, 100];
@@ -56,6 +57,7 @@ export function TradePanel({
   antiBundle: boolean;
   graduated: boolean;
 }) {
+  const tr = useT();
   const { authenticated, login } = usePrivy();
   const { wallets } = useWallets();
   const wallet = wallets[0];
@@ -142,7 +144,7 @@ export function TradePanel({
         if (cancelled) return;
         if (q.error || !q.amountOut) {
           setQuoteOut(null);
-          setQuoteErr(q.error ?? "报价失败");
+          setQuoteErr(q.error ?? tr("quoteFailed"));
           return;
         }
         setQuoteOut(BigInt(q.amountOut));
@@ -158,7 +160,7 @@ export function TradePanel({
       cancelled = true;
       clearTimeout(handle);
     };
-  }, [amount, side, token]);
+  }, [amount, side, token, tr]);
 
   function pickSlippage(bps: number) {
     setSlippageBps(bps);
@@ -199,7 +201,7 @@ export function TradePanel({
       return;
     }
     if (amountIn <= 0n) {
-      setStatus("❌ 数量为 0");
+      setStatus(tr("amtZero"));
       return;
     }
     if (busyRef.current) return;
@@ -207,14 +209,14 @@ export function TradePanel({
     setBusy(true);
     setSide(nextSide);
     setAmount(trimAmt(amountIn));
-    setStatus("报价中…");
+    setStatus(tr("quoting"));
     try {
       const quoteRes = await fetch(apiUrl(`/api/quote?token=${token}&side=${nextSide}&amount=${amountIn}`));
       const quote = (await quoteRes.json()) as { amountOut?: string; error?: string };
       if (quote.error || !quote.amountOut) throw new Error(quote.error ?? "quote failed");
       const minOut = (BigInt(quote.amountOut) * BigInt(10_000 - slippageBps)) / 10_000n;
 
-      setStatus("构造交易…");
+      setStatus(tr("buildingTx"));
       const txRes = await fetch(apiUrl("/api/build-tx"), {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -232,19 +234,19 @@ export function TradePanel({
       const provider = await wallet.getEthereumProvider();
       const walletChain = Number(String(wallet.chainId).split(":").pop());
       if (walletChain !== chainId) {
-        setStatus("切换网络…");
+        setStatus(tr("switchNet"));
         await wallet.switchChain(chainId);
       }
       for (const [i, tx] of txs.entries()) {
-        setStatus(txs.length > 1 ? `签名 ${i + 1}/${txs.length}(approve/swap)…` : "签名发送中…");
+        setStatus(txs.length > 1 ? tr("signingN", { i: i + 1, n: txs.length }) : tr("signing"));
         const hash = (await provider.request({
           method: "eth_sendTransaction",
           params: [{ from: wallet.address, to: tx.to, data: tx.data, value: `0x${BigInt(tx.value).toString(16)}` }],
         })) as string;
-        setStatus(txs.length > 1 ? `等待确认 ${i + 1}/${txs.length}…` : "等待确认…");
+        setStatus(txs.length > 1 ? tr("waitingN", { i: i + 1, n: txs.length }) : tr("waiting"));
         await waitReceipt(provider, hash);
       }
-      setStatus("✅ 已发送");
+      setStatus(tr("sent"));
       void refreshBals();
     } catch (e) {
       setStatus(`❌ ${(e as Error).message.slice(0, 120)}`);
@@ -258,13 +260,13 @@ export function TradePanel({
     try {
       void execute(side, parseEther(amount || "0"));
     } catch {
-      setStatus("❌ 数量无效");
+      setStatus(tr("amtBad"));
     }
   }
 
   function quickSell(pct: number) {
     if (tokenBal <= 0n) {
-      setStatus("❌ 没有可卖持仓");
+      setStatus(tr("noSellPos"));
       return;
     }
     const amt = (tokenBal * BigInt(Math.round(pct))) / 100n;
@@ -275,7 +277,7 @@ export function TradePanel({
     try {
       void execute("buy", parseEther(String(eth)));
     } catch {
-      setStatus("❌ ETH 数量无效");
+      setStatus(tr("ethBad"));
     }
   }
 
@@ -312,23 +314,23 @@ export function TradePanel({
                 color: side === s ? "#000" : "#eaecef",
               }}
             >
-              {s === "buy" ? "买入" : "卖出"}
+              {s === "buy" ? tr("buy") : tr("sell")}
             </button>
           ))}
         </div>
 
         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#5e6673", marginBottom: 6 }}>
-          <span>{side === "buy" ? "支付 ETH" : "卖出代币"}</span>
+          <span>{side === "buy" ? tr("payEth") : tr("sellToken")}</span>
           <span>
             {side === "buy"
-              ? `余额 ${trimAmt(ethBal, 4)} ETH`
-              : `持仓 ${fmtTokens(tokenBal)}`}
+              ? tr("balEth", { n: trimAmt(ethBal, 4) })
+              : tr("posTok", { n: fmtTokens(tokenBal) })}
           </span>
         </div>
         <input
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
-          placeholder={side === "buy" ? "ETH 数量" : "代币数量"}
+          placeholder={side === "buy" ? tr("ethAmt") : tr("tokenAmt")}
           style={{
             width: "100%", boxSizing: "border-box", padding: 12, marginBottom: 8, fontSize: 14,
             background: "#161b22", border: "1px solid #2b3139", borderRadius: 8, color: "#fff", outline: "none",
@@ -356,22 +358,22 @@ export function TradePanel({
             <span style={{ color: "#f6465d" }}>{quoteErr}</span>
           ) : quoteOut != null ? (
             side === "buy" ? (
-              <>大约得到 <b style={{ color: "#0ecb81" }}>{fmtTokens(quoteOut)}</b> 枚代币</>
+              <>{tr("approxTok")} <b style={{ color: "#0ecb81" }}>{fmtTokens(quoteOut)}</b> {tr("tokensUnit")}</>
             ) : (
-              <>大约得到 <b style={{ color: "#0ecb81" }}>{trimAmt(quoteOut, 5)} ETH</b></>
+              <>{tr("approxTok")} <b style={{ color: "#0ecb81" }}>{trimAmt(quoteOut, 5)} ETH</b></>
             )
           ) : (
-            <span style={{ color: "#5e6673" }}>{side === "buy" ? "输入 ETH 后显示买入枚数" : "输入数量后显示换回 ETH"}</span>
+            <span style={{ color: "#5e6673" }}>{side === "buy" ? tr("enterEth") : tr("enterAmt")}</span>
           )}
         </div>
 
         <div style={{ fontSize: 11, color: "#848e9c", marginBottom: 12, lineHeight: 1.6 }}>
-          {graduated ? "毕业后走 SnowSwapRouter(V4)" : "曲线直购"}
+          {graduated ? tr("afterGrad") : tr("onCurveBuy")}
           {" · "}
-          <span title="不含创建者税,税率见代币信息条">
-            手续费 协议 1% + Gas
+          <span title={tr("taxExcluded")}>
+            {tr("feeLine")}
           </span>
-          {antiBundle && !graduated && <span style={{ color: "#f0b90b" }}> · ⚠ antiBundle:仅 EOA 可买</span>}
+          {antiBundle && !graduated && <span style={{ color: "#f0b90b" }}> · {tr("eoaOnly")}</span>}
         </div>
 
         {authenticated ? (
@@ -384,11 +386,11 @@ export function TradePanel({
               color: "#000", fontWeight: 800, cursor: busy ? "wait" : "pointer", opacity: busy ? 0.7 : 1,
             }}
           >
-            {busy ? "处理中…" : side === "buy" ? "买入" : "卖出"}
+            {busy ? tr("processing") : side === "buy" ? tr("buy") : tr("sell")}
           </button>
         ) : (
           <button onClick={login} style={{ width: "100%", padding: 13, border: 0, borderRadius: 8, background: "#f0b90b", fontWeight: 800, fontSize: 14, cursor: "pointer" }}>
-            登录后交易
+            {tr("loginToTrade")}
           </button>
         )}
         {status && <div style={{ marginTop: 8, fontSize: 12, color: "#848e9c" }}>{status}</div>}
@@ -397,7 +399,7 @@ export function TradePanel({
       {/* 快捷买卖:点即成交 */}
       <div style={{ padding: "0 14px 12px", borderTop: "1px solid #1e2329" }}>
         <div style={{ display: "flex", alignItems: "center", margin: "10px 0 6px" }}>
-          <span style={{ fontSize: 11, fontWeight: 700, color: "#848e9c" }}>快捷买卖 · 点按即下单</span>
+          <span style={{ fontSize: 11, fontWeight: 700, color: "#848e9c" }}>{tr("quickTrade")}</span>
           <button
             type="button"
             onClick={() => setEditQuick((v) => !v)}
@@ -406,11 +408,11 @@ export function TradePanel({
               color: editQuick ? "#f0b90b" : "#5e6673", fontSize: 10, fontWeight: 700, cursor: "pointer", padding: "2px 8px",
             }}
           >
-            {editQuick ? "完成" : "自定义"}
+            {editQuick ? tr("done") : tr("custom")}
           </button>
         </div>
 
-        <div style={{ fontSize: 10, color: "#5e6673", marginBottom: 4 }}>一键买入 (ETH)</div>
+        <div style={{ fontSize: 10, color: "#5e6673", marginBottom: 4 }}>{tr("oneTapBuy")}</div>
         {editQuick ? (
           <QuickEditor values={buyEths} suffix="ETH" onChange={saveBuyEths} />
         ) : (
@@ -432,7 +434,7 @@ export function TradePanel({
           </div>
         )}
 
-        <div style={{ fontSize: 10, color: "#5e6673", marginBottom: 4 }}>一键卖出 (持仓%)</div>
+        <div style={{ fontSize: 10, color: "#5e6673", marginBottom: 4 }}>{tr("oneTapSell")}</div>
         {editQuick ? (
           <QuickEditor values={sellPcts} suffix="%" onChange={saveSellPcts} />
         ) : (
@@ -448,7 +450,7 @@ export function TradePanel({
                   border: 0, borderRadius: 6, background: "#f6465d", color: "#000",
                 }}
               >
-                卖 {p}%
+                {tr("sellPct", { n: p })}
               </button>
             ))}
           </div>
@@ -463,16 +465,16 @@ export function TradePanel({
             background: "transparent", border: 0, cursor: "pointer", color: "#848e9c", fontSize: 12, fontWeight: 700,
           }}
         >
-          ⚙ 交易设置
+          {tr("settings")}
           <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 400 }}>
-            滑点 {(slippageBps / 100).toFixed(1)}% · Gas {GAS_PRESETS.find((g) => g.key === gasKey)?.label}
+            {tr("slippage")} {(slippageBps / 100).toFixed(1)}% · {tr("gas")} {tr(GAS_PRESETS.find((g) => g.key === gasKey)?.label ?? "gasStd")}
           </span>
           <span style={{ transform: showSettings ? "rotate(180deg)" : "none", transition: "transform .2s" }}>▾</span>
         </button>
 
         {showSettings && (
           <div style={{ padding: "4px 14px 14px", borderTop: "1px solid #1e2329" }}>
-            <div style={{ fontSize: 11, color: "#5e6673", margin: "10px 0 6px" }}>滑点容差</div>
+            <div style={{ fontSize: 11, color: "#5e6673", margin: "10px 0 6px" }}>{tr("slipTol")}</div>
             <div style={{ display: "flex", gap: 6 }}>
               {[100, 500, 1000].map((bps) => (
                 <button
@@ -491,7 +493,7 @@ export function TradePanel({
               <input
                 value={customSlippage}
                 onChange={(e) => applyCustomSlippage(e.target.value)}
-                placeholder="自定义%"
+                placeholder={tr("customPct")}
                 style={{
                   width: 70, padding: "6px 8px", fontSize: 12, textAlign: "center",
                   background: "#0b0e11", border: `1px solid ${customSlippage ? "#f0b90b" : "#2b3139"}`,
@@ -500,7 +502,7 @@ export function TradePanel({
               />
             </div>
 
-            <div style={{ fontSize: 11, color: "#5e6673", margin: "12px 0 6px" }}>Gas 档位</div>
+            <div style={{ fontSize: 11, color: "#5e6673", margin: "12px 0 6px" }}>{tr("gasTier")}</div>
             <div style={{ display: "flex", gap: 6 }}>
               {GAS_PRESETS.map((g) => (
                 <button
@@ -513,13 +515,13 @@ export function TradePanel({
                     color: gasKey === g.key ? "#f0b90b" : "#848e9c",
                   }}
                 >
-                  {g.label}
+                  {tr(g.label)}
                   <span style={{ display: "block", fontSize: 10, fontWeight: 400 }}>×{g.mult}</span>
                 </button>
               ))}
             </div>
             <div style={{ fontSize: 10, color: "#3d4450", marginTop: 8 }}>
-              Gas 档位为偏好设置(本地保存),当前链默认 gas 策略已适用大多数情况
+              {tr("gasNote")}
             </div>
           </div>
         )}

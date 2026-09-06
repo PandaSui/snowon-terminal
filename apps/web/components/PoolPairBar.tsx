@@ -4,6 +4,7 @@ import { apiUrl } from "@/lib/apiBase";
 import { useQuery } from "@tanstack/react-query";
 import { readJson } from "@/lib/http";
 import { fmtQuote, type QuoteUnit } from "@/lib/quoteUnit";
+import { useT } from "@/lib/locale";
 
 interface PoolInfo {
   symbol: string;
@@ -65,6 +66,7 @@ function Pair({
 }
 
 export function PoolPairBar({ address, unit, ethUsd }: { address: string; unit: QuoteUnit; ethUsd?: number }) {
+  const tr = useT();
   const { data } = useQuery({
     queryKey: ["token-pool", address],
     queryFn: async () => {
@@ -88,7 +90,7 @@ export function PoolPairBar({ address, unit, ethUsd }: { address: string; unit: 
       <span style={{ fontWeight: 800, color: "#eaecef" }}>{pair}</span>
       {data.current ? (
         <Pair
-          label="现池"
+          label={tr("livePool")}
           quote={data.current.quote}
           token={data.current.token}
           quoteSymbol={data.quoteSymbol}
@@ -98,11 +100,11 @@ export function PoolPairBar({ address, unit, ethUsd }: { address: string; unit: 
           quoteIsEth={quoteIsEth}
         />
       ) : (
-        <span>{data.graduated ? "现池读取中/不可用" : "曲线阶段 · 用 ETH 直购"}</span>
+        <span>{data.graduated ? tr("poolLoading") : tr("curveBuyEth")}</span>
       )}
       {data.initial && (
         <Pair
-          label={data.locked ? "毕业锁仓" : "初始池"}
+          label={data.locked ? tr("gradLock") : tr("initPool")}
           quote={data.initial.quote}
           token={data.initial.token}
           quoteSymbol={data.quoteSymbol}
@@ -112,7 +114,7 @@ export function PoolPairBar({ address, unit, ethUsd }: { address: string; unit: 
           quoteIsEth={quoteIsEth}
         />
       )}
-      {data.locked && <span style={{ color: "#0ecb81", fontWeight: 700 }}>LP 永久锁定</span>}
+      {data.locked && <span style={{ color: "#0ecb81", fontWeight: 700 }}>{tr("lpPermLock")}</span>}
     </div>
   );
 }

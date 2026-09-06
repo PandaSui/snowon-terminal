@@ -6,12 +6,14 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { readJson } from "@/lib/http";
 import type { HomeToken } from "./TokenCard";
+import { useLocale, useT } from "@/lib/locale";
+import { localizedAnalysisRules } from "./TokenAnalysisPanel";
 
 const PRESETS = [
-  { key: "movers", label: "🔥 现在涨幅最高的代币?" },
-  { key: "almost", label: "⏳ 谁最接近毕业?" },
-  { key: "overview", label: "📊 平台现在什么情况?" },
-  { key: "wallets", label: "🧠 这个币的交易钱包怎么看?" },
+  { key: "movers", q: "aiQ1" },
+  { key: "almost", q: "aiQ2" },
+  { key: "overview", q: "aiQ3" },
+  { key: "wallets", q: "aiQ4" },
 ] as const;
 
 type PresetKey = (typeof PRESETS)[number]["key"];
@@ -21,6 +23,7 @@ type PresetKey = (typeof PRESETS)[number]["key"];
  * 接入大模型后,这里换成流式对话;Preset 答案保留作快捷视图。
  */
 export function AiPanel({ tokenAddress }: { tokenAddress?: string }) {
+  const tr = useT();
   const [open, setOpen] = useState(false);
   const [answer, setAnswer] = useState<PresetKey | null>(null);
   const ref = useRef<HTMLDivElement>(null);
@@ -46,8 +49,8 @@ export function AiPanel({ tokenAddress }: { tokenAddress?: string }) {
 
   return (
     <div ref={ref} style={{ position: "relative" }}>
-      <button onClick={() => setOpen((v) => !v)} style={hdrBtn(open)} title="AI 助手">
-        ✦ AI
+      <button onClick={() => setOpen((v) => !v)} style={hdrBtn(open)} title={tr("aiHelper")}>
+        {tr("ai")}
       </button>
       {open && (
         <div
@@ -58,7 +61,7 @@ export function AiPanel({ tokenAddress }: { tokenAddress?: string }) {
           }}
         >
           <div style={{ padding: "10px 12px", borderBottom: "1px solid #1e2329", fontWeight: 700 }}>
-            ✦ AI 助手 <span style={{ fontSize: 11, color: "#5e6673", fontWeight: 400 }}>基于实时链上数据</span>
+            {tr("aiHelper")} <span style={{ fontSize: 11, color: "#5e6673", fontWeight: 400 }}>{tr("aiSub")}</span>
           </div>
           <div style={{ padding: 8, display: "flex", flexDirection: "column", gap: 6 }}>
             {PRESETS.filter((p) => p.key !== "wallets" || tokenAddress).map((p) => (
@@ -71,12 +74,12 @@ export function AiPanel({ tokenAddress }: { tokenAddress?: string }) {
                   border: "1px solid #2b3139", borderRadius: 8, color: "#eaecef",
                 }}
               >
-                {p.label}
+                {tr(p.q)}
               </button>
             ))}
           </div>
           <div style={{ padding: "4px 12px 12px", minHeight: 40 }}>
-            {!answer && <div style={{ color: "#5e6673" }}>点一个问题,我从当前盘面数据里给你答案。</div>}
+            {!answer && <div style={{ color: "#5e6673" }}>{tr("aiAsk")}</div>}
             {answer && tokens && (
               <Answer kind={answer} tokens={tokens} tokenAddress={tokenAddress} />
             )}
@@ -88,19 +91,34 @@ export function AiPanel({ tokenAddress }: { tokenAddress?: string }) {
 }
 
 function WalletAnswer({ address }: { address: string }) {
+  const tr = useT();
+  const [locale] = useLocale();
   const { data, isLoading } = useQuery({
-    queryKey: ["token-analysis", address],
+    queryKey: ["token-analysis", address, locale],
     queryFn: async () => {
-      const res = await fetch(apiUrl(`/api/token/${address}/analysis`));
-      return readJson<{ rules: string[]; llm: string | null; newWalletBuyShare: number; uniqueTraders: number }>(res);
+      const res = await fetch(apiUrl(`/api/token/${address}/analysis?lang=${locale}`));
+      return readJson<{
+        rules: string[];
+        llm: string | null;
+        trades24h: number;
+        uniqueTraders: number;
+        buyVolEth: number;
+        sellVolEth: number;
+        newWalletBuyShare: number;
+        newWalletCount: number;
+        clusterCount: number;
+        clusterEth: number;
+        phishEth: number;
+      }>(res);
     },
   });
-  if (isLoading) return <span style={{ color: "#5e6673" }}>正在读成交与钱包库…</span>;
-  if (!data) return <span style={{ color: "#5e6673" }}>没有这份代币的钱包样本。</span>;
+  if (isLoading) return <span style={{ color: "#5e6673" }}>{tr("readingWallets")}</span>;
+  if (!data) return <span style={{ color: "#5e6673" }}>{tr("noWalletSample")}</span>;
+  const rules = localizedAnalysisRules(tr, data);
   return (
     <div>
       {data.llm ? <p style={{ margin: "0 0 8px" }}>{data.llm}</p> : null}
-      {data.rules.slice(0, 4).map((r) => (
+      {rules.slice(0, 4).map((r) => (
         <div key={r} style={{ marginTop: 4, color: "#b7bcc5" }}>{r}</div>
       ))}
     </div>
@@ -116,8 +134,9 @@ function Answer({
   tokens: HomeToken[];
   tokenAddress?: string;
 }) {
+  const tr = useT();
   if (kind === "wallets") {
-    if (!tokenAddress) return <span style={{ color: "#5e6673" }}>打开某个代币页再问钱包结构。</span>;
+    if (!tokenAddress) return <span style={{ color: "#5e6673" }}>{tr("openTokenFirst")}</span>;
     return <WalletAnswer address={tokenAddress} />;
   }
   if (kind === "movers") {
@@ -125,10 +144,10 @@ function Answer({
       .filter((t) => t.change24hPct != null)
       .sort((a, b) => Number(b.change24hPct) - Number(a.change24hPct))
       .slice(0, 3);
-    if (!top.length) return <span style={{ color: "#5e6673" }}>24h 内还没有成交数据。</span>;
+    if (!top.length) return <span style={{ color: "#5e6673" }}>{tr("no24hTrades")}</span>;
     return (
       <div>
-        24h 涨幅前三:
+        {tr("topGainers")}
         {top.map((t) => (
           <div key={t.address} style={{ marginTop: 4 }}>
             <Link href={`/token/${t.address}`} style={{ color: "#f0b90b", textDecoration: "none" }}>
@@ -147,10 +166,10 @@ function Answer({
       .filter((t) => !t.graduated && Number(t.graduationProgress ?? 0) > 0)
       .sort((a, b) => Number(b.graduationProgress) - Number(a.graduationProgress))
       .slice(0, 3);
-    if (!top.length) return <span style={{ color: "#5e6673" }}>当前没有接近毕业的代币。</span>;
+    if (!top.length) return <span style={{ color: "#5e6673" }}>{tr("noAlmost")}</span>;
     return (
       <div>
-        毕业进度最高:
+        {tr("closestGrad")}
         {top.map((t) => (
           <div key={t.address} style={{ marginTop: 4 }}>
             <Link href={`/token/${t.address}`} style={{ color: "#f0b90b", textDecoration: "none" }}>
@@ -168,9 +187,9 @@ function Answer({
   const curve = tokens.length - graduated;
   return (
     <div>
-      当前共索引 <b>{tokens.length}</b> 个代币:
-      <span style={{ color: "#f0b90b" }}> {curve} 个曲线阶段</span>,
-      <span style={{ color: "#0ecb81" }}> {graduated} 个已毕业</span>。
+      {tr("indexedN", { n: tokens.length })}
+      <span style={{ color: "#f0b90b" }}> {tr("nOnCurve", { n: curve })}</span>
+      <span style={{ color: "#0ecb81" }}> {tr("nGraduated", { n: graduated })}</span>
     </div>
   );
 }

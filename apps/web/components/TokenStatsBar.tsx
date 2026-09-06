@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { readJson } from "@/lib/http";
 import { CHART_RESOLUTIONS, type ChartResolution } from "@/lib/chartResolutions";
 import { fmtUsdCompact, weiToEth } from "@/lib/quoteUnit";
+import { useT } from "@/lib/locale";
 
 interface WindowStats {
   vol: string;
@@ -53,6 +54,7 @@ export function TokenStatsBar({
     staleTime: 15_000,
   });
 
+  const tr = useT();
   if (!s) return null;
 
   return (
@@ -70,7 +72,7 @@ export function TokenStatsBar({
             key={value}
             type="button"
             onClick={() => onResolutionChange?.(value)}
-            title={`切换到 ${label} K线`}
+            title={tr("switchKline", { label })}
             style={{
               minWidth: 118, flex: 1, padding: "8px 10px", borderRadius: 8, cursor: "pointer",
               textAlign: "left",
@@ -85,10 +87,10 @@ export function TokenStatsBar({
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", marginTop: 5, gap: 8 }}>
               <span style={{ color: "#0ecb81" }}>
-                买 {fmtVol(w.buyVol, eth?.price)} <span style={{ opacity: 0.7 }}>({w.buys})</span>
+                {tr("buyShort")} {fmtVol(w.buyVol, eth?.price)} <span style={{ opacity: 0.7 }}>({w.buys})</span>
               </span>
               <span style={{ color: "#f6465d" }}>
-                卖 {fmtVol(w.sellVol, eth?.price)} <span style={{ opacity: 0.7 }}>({w.sells})</span>
+                {tr("sellShort")} {fmtVol(w.sellVol, eth?.price)} <span style={{ opacity: 0.7 }}>({w.sells})</span>
               </span>
             </div>
             <div style={{ marginTop: 5, height: 3, borderRadius: 2, background: "#f6465d", overflow: "hidden" }}>

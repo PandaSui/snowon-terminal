@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { usePrivy } from "@privy-io/react-auth";
 import { EmojiPicker } from "./EmojiPicker";
+import { EmojiAvatar } from "./EmojiAvatar";
+import { useT } from "@/lib/locale";
 
 interface ChatMsg {
   id: string;
@@ -18,6 +20,7 @@ interface ChatMsg {
  * 持仓徽章:用户名旁的百分比,来自消息发送时的快照。
  */
 export function ChatBox({ chainId, tokenAddress }: { chainId: number; tokenAddress: string }) {
+  const tr = useT();
   const { authenticated, user, login, getAccessToken } = usePrivy();
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState("");
@@ -85,14 +88,17 @@ export function ChatBox({ chainId, tokenAddress }: { chainId: number; tokenAddre
     <div style={{ border: "1px solid #1e2329", borderRadius: 10, background: "#0d1117", display: "flex", flexDirection: "column", height: "100%", minHeight: 0, minWidth: 0, overflow: "hidden", boxSizing: "border-box" }}>
       <div style={{ flex: 1, overflowY: "auto", padding: 12, fontSize: 13 }}>
         {messages.map((m) => (
-          <div key={m.id} style={{ marginBottom: 6 }}>
+          <div key={m.id} style={{ marginBottom: 6, display: "flex", alignItems: "flex-start", gap: 6 }}>
+            <EmojiAvatar seed={m.userId || m.username} size={18} />
+            <span style={{ minWidth: 0 }}>
             <span style={{ color: "#f0b90b", fontWeight: 600 }}>{m.username}</span>
             {m.holdingShareBps != null && m.holdingShareBps > 0 && (
               <span style={{ marginLeft: 6, fontSize: 11, color: "#0ecb81" }}>
-                持仓 {(m.holdingShareBps / 100).toFixed(2)}%
+                {tr("holdShare", { pct: (m.holdingShareBps / 100).toFixed(2) })}
               </span>
             )}
             <span style={{ marginLeft: 8, wordBreak: "break-word" }}>{m.content}</span>
+            </span>
           </div>
         ))}
       </div>
@@ -103,7 +109,7 @@ export function ChatBox({ chainId, tokenAddress }: { chainId: number; tokenAddre
           onChange={(e) => setDmkInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && (authenticated ? sendDanmaku() : login())}
           maxLength={60}
-          placeholder={authenticated ? "弹幕…" : "登录发弹幕"}
+          placeholder={authenticated ? tr("danmakuPh") : tr("danmakuLogin")}
           style={{
             flex: 1, minWidth: 0, padding: "7px 8px", fontSize: 12,
             background: "#0b0e11", border: "1px solid #2b3139", borderRadius: 6,
@@ -112,14 +118,14 @@ export function ChatBox({ chainId, tokenAddress }: { chainId: number; tokenAddre
         />
         <button
           onClick={authenticated ? sendDanmaku : login}
-          title="付费 5U,炫彩字体弹幕飘过 K 线图"
+          title={tr("danmakuTip")}
           style={{
             flexShrink: 0, padding: "0 8px", border: 0, borderRadius: 6, cursor: "pointer",
             background: "linear-gradient(90deg,#00c3ff,#b15bff,#ff004c)",
             color: "#fff", fontSize: 11, fontWeight: 800, whiteSpace: "nowrap",
           }}
         >
-          弹幕
+          {tr("danmaku")}
         </button>
       </div>
       <div style={{ display: "flex", alignItems: "stretch", borderTop: "1px solid #1e2329", minWidth: 0 }}>
@@ -127,7 +133,7 @@ export function ChatBox({ chainId, tokenAddress }: { chainId: number; tokenAddre
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && (authenticated ? send() : login())}
-          placeholder={authenticated ? "说点什么…" : "登录后聊天"}
+          placeholder={authenticated ? tr("saySomething") : tr("chatLogin")}
           style={{
             flex: 1, minWidth: 0, padding: "10px 8px", background: "transparent",
             border: 0, color: "#fff", outline: "none", fontSize: 12,
@@ -141,7 +147,7 @@ export function ChatBox({ chainId, tokenAddress }: { chainId: number; tokenAddre
             fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap", fontSize: 12,
           }}
         >
-          发送
+          {tr("send")}
         </button>
       </div>
     </div>

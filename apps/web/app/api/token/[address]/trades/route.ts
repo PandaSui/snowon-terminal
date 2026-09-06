@@ -131,7 +131,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ address:
           tr.tx_hash, tr.log_index, tr.trader, tr.is_buy, tr.kind,
           tr.eth_amount, tr.token_amount, tr.price_eth, tr.phase, tr.block_timestamp,
           w.first_seen_at, w.last_seen_at, w.first_funder, w.funder_label, w.labels,
-          p.buy_count, p.sell_count, p.total_bought_eth, p.balance
+          p.buy_count, p.sell_count, p.total_bought_eth, p.balance, p.first_buy_at
         FROM trades tr
         LEFT JOIN wallets w ON w.chain_id = tr.chain_id AND w.address = tr.trader
         LEFT JOIN positions p
@@ -171,6 +171,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ address:
         r.buy_count AS "buyCount",
         r.sell_count AS "sellCount",
         (r.total_bought_eth::numeric / 1e18)::text AS "totalBoughtEth",
+        to_json(r.first_buy_at)#>>'{}' AS "firstBuyAt",
         coalesce(c.n, 0)::int AS "clusterSize"
       FROM recent r
       LEFT JOIN clusters c ON c.first_funder = r.first_funder
@@ -197,12 +198,16 @@ export async function GET(req: Request, { params }: { params: Promise<{ address:
       buyCount: number;
       sellCount: number;
       totalBoughtEth: string | null;
+      firstBuyAt: string | Date | null;
       clusterSize: number;
     }>(res).map((t) => {
       const labels = parseLabels(t.labels);
       const firstSeen = t.firstSeenAt ? new Date(t.firstSeenAt).getTime() : NaN;
       const isNewWallet = Number.isFinite(firstSeen) && firstSeen >= cutoff;
       const clusterSize = Number(t.clusterSize ?? 0);
+      const tradeMs = t.blockTimestamp ? new Date(t.blockTimestamp).getTime() : NaN;
+      const firstBuyMs = t.firstBuyAt ? new Date(t.firstBuyAt).getTime() : NaN;
+      const isFirstBuy = !!t.isBuy && Number.isFinite(tradeMs) && Number.isFinite(firstBuyMs) && Math.abs(tradeMs - firstBuyMs) <= 3000;
       return {
         txHash: t.txHash,
         logIndex: t.logIndex,
@@ -220,7 +225,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ address:
         totalBoughtEth: t.totalBoughtEth,
         firstFunder: t.firstFunder,
         isNewWallet,
-        isFirstBuy: !!t.isBuy && (t.buyCount ?? 0) <= 1,
+        isFirstBuy,
         sameFunder: clusterSize >= 2,
         clusterSize,
         isPhish: isPhish(t.funderLabel, labels),

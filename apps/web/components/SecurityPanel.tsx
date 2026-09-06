@@ -4,6 +4,7 @@ import { apiUrl } from "@/lib/apiBase";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { readJson } from "@/lib/http";
+import { useT } from "@/lib/locale";
 
 /** 与 /api/token/[address] 返回的代币行对应的字段(仅安全面板用到的) */
 export interface TokenSecurity {
@@ -62,6 +63,7 @@ function fmtPct(n: number | null | undefined): string {
 }
 
 function CopyRow({ label, value }: { label: string; value: string }) {
+  const tr = useT();
   const [copied, setCopied] = useState(false);
   return (
     <button
@@ -71,7 +73,7 @@ function CopyRow({ label, value }: { label: string; value: string }) {
           setTimeout(() => setCopied(false), 1500);
         }).catch(() => {});
       }}
-      title={`点击复制 ${label}`}
+      title={tr("clickCopy", { label })}
       style={{
         display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8,
         width: "100%", padding: "5px 0", background: "none", border: 0, borderBottom: "1px solid #161b22",
@@ -80,7 +82,7 @@ function CopyRow({ label, value }: { label: string; value: string }) {
     >
       <span>{label}</span>
       <span style={{ fontFamily: "monospace", color: copied ? OK : "#eaecef" }}>
-        {copied ? "✓ 已复制" : shortAddr(value)}
+        {copied ? `✓ ${tr("copied")}` : shortAddr(value)}
       </span>
     </button>
   );
@@ -125,6 +127,7 @@ function lockColor(pct: number | null) {
 
 /** 合约安全性 / 流动性池 / 开源信息面板(底部第三栏) */
 export function SecurityPanel({ token }: { token: TokenSecurity }) {
+  const tr = useT();
   const buyTax = token.buyTaxBps ?? 0;
   const sellTax = token.sellTaxBps ?? 0;
   const score = token.bundleScore?.score;
@@ -151,20 +154,22 @@ export function SecurityPanel({ token }: { token: TokenSecurity }) {
   return (
     <div style={{ border: "1px solid #1e2329", borderRadius: 10, background: "#0d1117", display: "flex", flexDirection: "column" }}>
       <div style={{ padding: "10px 12px", borderBottom: "1px solid #1e2329", fontSize: 13, fontWeight: 700 }}>
-        🛡️ 合约安全
+        {tr("contractSecurity")}
       </div>
 
       <div className="col-scroll" style={{ padding: "4px 12px 8px" }}>
         <Row
-          label="合约开源"
+          label={tr("contractOpenSource")}
           status={
             verified
-              ? `已开源${contractName ? ` · ${contractName}` : ""} ↗`
+              ? contractName
+                ? tr("openSourcedName", { name: contractName })
+                : `${tr("openSourced")} ↗`
               : verified === false
                 ? token.github
-                  ? "未验证 · 有 GitHub ↗"
-                  : "未验证"
-                : "查询中…"
+                  ? tr("unverifiedGithub")
+                  : tr("unverified")
+                : tr("querying")
           }
           color={verified ? OK : verified === false && !token.github ? DIM : WARN}
           href={verified ? explorerUrl : token.github || explorerUrl}
@@ -172,88 +177,88 @@ export function SecurityPanel({ token }: { token: TokenSecurity }) {
         />
         {(sec?.curveVerified || snowon) && token.curveAddress && (
           <Row
-            label="曲线合约开源"
-            status={`已开源${sec?.curveName ? ` · ${sec.curveName}` : " · SnowBondingCurve"} ↗`}
+            label={tr("curveOpenSource")}
+            status={tr("openSourcedName", { name: sec?.curveName ? sec.curveName : "SnowBondingCurve" })}
             color={OK}
             href={sec?.curveExplorerUrl ?? `https://robinhoodchain.blockscout.com/address/${token.curveAddress}#contract`}
           />
         )}
         {token.github && verified && (
-          <Row label="GitHub" status="源码仓库 ↗" color={OK} href={token.github} />
+          <Row label="GitHub" status={tr("sourceRepo")} color={OK} href={token.github} />
         )}
 
-        <div style={{ padding: "8px 0 2px", fontSize: 11, color: DIM, fontWeight: 700 }}>流动池锁定 / 燃烧</div>
+        <div style={{ padding: "8px 0 2px", fontSize: 11, color: DIM, fontWeight: 700 }}>{tr("lpLockBurn")}</div>
         {token.graduated ? (
           <>
             <Row
-              label="LP 锁定比例"
+              label={tr("lpLockPct")}
               status={fmtPct(lockPct)}
               color={lockColor(lockPct)}
-              sub={lockPct === 100 ? "hook 禁止撤流动性" : undefined}
+              sub={lockPct === 100 ? tr("hookNoRemove") : undefined}
             />
             {lockPct != null && <RatioBar pct={lockPct} color={lockColor(lockPct)} />}
             <Row
-              label="LP 燃烧锁定"
+              label={tr("lpBurnLock")}
               status={fmtPct(burnPct)}
               color={lockColor(burnPct)}
-              sub={burnPct === 100 ? "仓位永久锁死,等价燃烧" : undefined}
+              sub={burnPct === 100 ? tr("permLock") : undefined}
             />
             {burnPct != null && <RatioBar pct={burnPct} color={lockColor(burnPct)} />}
             <Row
-              label="代币销毁占比"
+              label={tr("tokenBurnPct")}
               status={fmtPct(tokenBurn)}
               color={tokenBurn != null && tokenBurn > 0 ? OK : DIM}
             />
             {tokenBurn != null && tokenBurn > 0 && <RatioBar pct={tokenBurn} color={OK} />}
           </>
         ) : (
-          <Row label="LP 锁定比例" status="曲线阶段 · 毕业后永久锁定" color={WARN} />
+          <Row label={tr("lpLockPct")} status={tr("curveThenLock")} color={WARN} />
         )}
 
         <Row
-          label="防捆绑 antiBundle"
-          status={token.antiBundle ? "开启" : "关闭"}
+          label={tr("antiBundleLabel")}
+          status={token.antiBundle ? tr("enabled") : tr("disabled")}
           color={token.antiBundle ? OK : DIM}
         />
         <Row
-          label="防狙击 antiSnipe"
-          status={token.antiSnipe ? "开启" : "关闭"}
+          label={tr("antiSnipeLabel")}
+          status={token.antiSnipe ? tr("enabled") : tr("disabled")}
           color={token.antiSnipe ? OK : DIM}
         />
-        <Row label="买税" status={`${(buyTax / 100).toFixed(2)}%`} color={taxColor(buyTax)} />
-        <Row label="卖税" status={`${(sellTax / 100).toFixed(2)}%`} color={taxColor(sellTax)} />
+        <Row label={tr("buyTax")} status={`${(buyTax / 100).toFixed(2)}%`} color={taxColor(buyTax)} />
+        <Row label={tr("sellTax")} status={`${(sellTax / 100).toFixed(2)}%`} color={taxColor(sellTax)} />
 
-        <div style={{ padding: "8px 0 2px", fontSize: 11, color: DIM, fontWeight: 700 }}>风险检测(启发式)</div>
+        <div style={{ padding: "8px 0 2px", fontSize: 11, color: DIM, fontWeight: 700 }}>{tr("riskHeuristic")}</div>
         <Row
-          label="貔貅检测"
+          label={tr("honeypot")}
           status={
             sec == null
-              ? "检测中…"
+              ? tr("detecting")
               : sec.honeypotSuspected
-                ? "疑似貔貅"
+                ? tr("suspectedHoneypot")
                 : sec.sellRisk === "warn"
-                  ? "高卖出税"
-                  : "可正常卖出"
+                  ? tr("highSellTax")
+                  : tr("canSell")
           }
           color={sec == null ? DIM : sec.honeypotSuspected ? BAD : sec.sellRisk === "warn" ? WARN : OK}
           sub={
             sec?.sellTaxOnchain != null
-              ? `链上卖税 ${(sec.sellTaxOnchain / 100).toFixed(2)}%`
+              ? tr("onchainSellTax", { n: (sec.sellTaxOnchain / 100).toFixed(2) })
               : undefined
           }
         />
         <Row
-          label="权限放弃"
+          label={tr("renounced")}
           status={
             sec == null
-              ? "检测中…"
+              ? tr("detecting")
               : sec.owner?.status === "renounced"
-                ? "已放弃"
+                ? tr("abandoned")
                 : sec.owner?.status === "owned"
-                  ? "未放弃"
+                  ? tr("notAbandoned")
                   : sec.owner?.status === "none"
-                    ? "无所有权函数"
-                    : "未知"
+                    ? tr("noOwnerFn")
+                    : tr("unknown")
           }
           color={
             sec == null
@@ -267,28 +272,28 @@ export function SecurityPanel({ token }: { token: TokenSecurity }) {
           sub={sec?.owner?.status === "owned" && sec.owner.address ? `owner: ${shortAddr(sec.owner.address)}` : undefined}
         />
         <Row
-          label="黑名单功能"
-          status={sec == null ? "检测中…" : sec.blacklist?.detected ? "检测到" : "无"}
+          label={tr("blacklistFn")}
+          status={sec == null ? tr("detecting") : sec.blacklist?.detected ? tr("detected") : tr("noneFound")}
           color={sec == null ? DIM : sec.blacklist?.detected ? BAD : OK}
           sub={sec?.blacklist?.detected ? sec.blacklist.hits.slice(0, 2).join(", ") : undefined}
         />
         {score != null && (
           <Row
-            label="捆绑评分"
+            label={tr("bundleRating")}
             status={`${score}/100`}
             color={score > 60 ? BAD : score > 30 ? WARN : OK}
           />
         )}
 
-        <div style={{ padding: "8px 0 2px", fontSize: 11, color: DIM, fontWeight: 700 }}>地址</div>
+        <div style={{ padding: "8px 0 2px", fontSize: 11, color: DIM, fontWeight: 700 }}>{tr("addresses")}</div>
         {token.graduated && token.poolId ? (
-          <Row label="Uniswap V4 池" status={shortAddr(token.poolId)} color={OK} />
+          <Row label={tr("v4PoolLabel")} status={shortAddr(token.poolId)} color={OK} />
         ) : (
-          <Row label="状态" status="联合曲线阶段(未毕业)" color={WARN} />
+          <Row label={tr("statusLabel")} status={tr("onCurveUngrad")} color={WARN} />
         )}
-        {token.curveAddress && <CopyRow label="曲线合约" value={token.curveAddress} />}
-        {token.address && <CopyRow label="代币合约" value={token.address} />}
-        {token.creator && <CopyRow label="创建者" value={token.creator} />}
+        {token.curveAddress && <CopyRow label={tr("curveContract")} value={token.curveAddress} />}
+        {token.address && <CopyRow label={tr("tokenContract")} value={token.address} />}
+        {token.creator && <CopyRow label={tr("creator")} value={token.creator} />}
       </div>
     </div>
   );

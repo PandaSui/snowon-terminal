@@ -145,7 +145,7 @@ export default function DiscoverPage() {
         </h1>
         <AppNav current="discover" />
         {isAdmin && (
-          <Link href="/admin" className="desktop-only" style={{ color: "#848e9c", textDecoration: "none", fontSize: 13 }}>管理</Link>
+          <Link href="/admin" className="desktop-only" style={{ color: "#848e9c", textDecoration: "none", fontSize: 13 }}>{t(locale, "admin")}</Link>
         )}
         <div className="search-wrap" style={{ flex: 1, display: "flex", justifyContent: "center" }}>
           <SearchBox />
@@ -188,7 +188,7 @@ export default function DiscoverPage() {
               </button>
             ))}
             <button onClick={() => setTab("chat")} style={tabStyle(tab === "chat")}>
-              💬 聊天
+              {t(locale, "tabChat")}
             </button>
           </nav>
         </>

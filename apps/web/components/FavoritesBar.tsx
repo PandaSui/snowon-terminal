@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { FAVORITES_EVENT, getFavorites } from "@/lib/favorites";
 import { useQuery } from "@tanstack/react-query";
 import { TokenLogo } from "./TokenLogo";
+import { useT } from "@/lib/locale";
 import type { HomeToken } from "./TokenCard";
 import { readJson } from "@/lib/http";
 import { fmtPriceUsd } from "@/lib/quoteUnit";
@@ -15,6 +16,7 @@ import { fmtPriceUsd } from "@/lib/quoteUnit";
  * 卡片右上角 ☆ 收藏后出现在这里;点击芯片直达代币页。
  */
 export function FavoritesBar({ tokens }: { tokens: HomeToken[] }) {
+  const tr = useT();
   const [favs, setFavs] = useState<string[]>([]);
   const { data: eth } = useQuery({
     queryKey: ["eth-price"],
@@ -44,9 +46,9 @@ export function FavoritesBar({ tokens }: { tokens: HomeToken[] }) {
         borderRadius: 8, overflowX: "auto", fontSize: 12,
       }}
     >
-      <span style={{ flexShrink: 0, fontSize: 11, color: "#f0b90b", fontWeight: 700, letterSpacing: 1 }}>★ 收藏</span>
+      <span style={{ flexShrink: 0, fontSize: 11, color: "#f0b90b", fontWeight: 700, letterSpacing: 1 }}>{tr("favorites")}</span>
       {starred.length === 0 ? (
-        <span style={{ color: "#3d4450", fontSize: 11 }}>点代币卡片右上角的 ☆ 收藏到这里</span>
+        <span style={{ color: "#3d4450", fontSize: 11 }}>{tr("favoritesHint")}</span>
       ) : (
         starred.map((t) => {
           const pct = t.change24hPct == null ? null : Number(t.change24hPct) * 100;

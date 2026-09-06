@@ -27,6 +27,7 @@ import { useIsMobile } from "@/lib/useIsMobile";
 import { FAVORITES_EVENT, isFavorite, toggleFavorite } from "@/lib/favorites";
 import { fmtMcapUsd, fmtPriceUsd, fmtUsdCompact, weiToEth } from "@/lib/quoteUnit";
 import { useTranslatedTexts } from "@/lib/useTranslated";
+import { useT } from "@/lib/locale";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import type { HomeToken } from "@/components/TokenCard";
 import type { ChartResolution } from "@/lib/chartResolutions";
@@ -100,6 +101,7 @@ export default function TokenPage() {
   const { address } = useParams<{ address: string }>();
   const { login, logout, authenticated, user } = usePrivy();
   const isMobile = useIsMobile();
+  const tr = useT();
   const [fav, setFav] = useState(false);
   const [copied, setCopied] = useState(false);
   const [chartRes, setChartRes] = useState<ChartResolution>("5");
@@ -247,9 +249,9 @@ export default function TokenPage() {
     return () => window.removeEventListener(FAVORITES_EVENT, sync);
   }, [address]);
 
-  if (isLoading) return <main style={{ padding: 24 }}>加载中…</main>;
-  if (isError) return <main style={{ padding: 24 }}>加载失败：{(error as Error).message}</main>;
-  if (!token || token.notFound) return <main style={{ padding: 24 }}>代币不存在</main>;
+  if (isLoading) return <main style={{ padding: 24 }}>{tr("loading")}</main>;
+  if (isError) return <main style={{ padding: 24 }}>{`${tr("loadFailed")}: ${(error as Error).message}`}</main>;
+  if (!token || token.notFound) return <main style={{ padding: 24 }}>{tr("tokenMissing")}</main>;
 
   const change = fmtChange(homeToken?.change24hPct);
   const ethUsd = eth?.price;
@@ -319,7 +321,7 @@ export default function TokenPage() {
             fontWeight: 700, fontSize: 12, cursor: "pointer", whiteSpace: "nowrap",
           }}
         >
-          {authenticated ? `${user?.wallet?.address?.slice(0, 6) ?? user?.email ?? ""}…` : "钱包链接"}
+          {authenticated ? `${user?.wallet?.address?.slice(0, 6) ?? user?.email ?? ""}…` : tr("wallet")}
         </button>
       </header>
 
@@ -340,7 +342,7 @@ export default function TokenPage() {
             <span style={{ fontSize: 13, color: "#848e9c" }}>${token.symbol}</span>
             <button
               onClick={() => toggleFavorite(address)}
-              title={fav ? "取消收藏" : "收藏到顶部栏"}
+              title={fav ? tr("unfav") : tr("fav")}
               style={{ background: "none", border: 0, cursor: "pointer", fontSize: 16, color: fav ? "#f0b90b" : "#3d4450", padding: 0 }}
             >
               {fav ? "★" : "☆"}
@@ -348,26 +350,26 @@ export default function TokenPage() {
           </div>
           <button
             onClick={copyAddress}
-            title="点击复制合约地址"
+            title={tr("copyContract")}
             style={{
               marginTop: 2, background: "none", border: 0, padding: 0, cursor: "pointer",
               fontFamily: "monospace", fontSize: 11, color: copied ? "#0ecb81" : "#5e6673",
             }}
           >
-            {copied ? "✓ 已复制" : `${address.slice(0, 10)}…${address.slice(-8)}`}
+            {copied ? `✓ ${tr("copied")}` : `${address.slice(0, 10)}…${address.slice(-8)}`}
           </button>
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
           {token.skill && <Badge color="#5e8bff">{token.skill}</Badge>}
           {token.graduated
-            ? <Badge color="#0ecb81">已毕业 · V4 池 LP 永久锁定</Badge>
-            : <Badge color="#f0b90b">曲线阶段</Badge>}
+            ? <Badge color="#0ecb81">{tr("graduatedLocked")}</Badge>
+            : <Badge color="#f0b90b">{tr("onCurve")}</Badge>}
           {token.antiBundle && <Badge color="#848e9c">antiBundle</Badge>}
           {token.isRwa && <Badge color="#5e8bff">RWA</Badge>}
           {token.bundleScore && (
             <Badge color={token.bundleScore.score > 60 ? "#f6465d" : "#0ecb81"}>
-              捆绑分 {token.bundleScore.score}/100
+              {tr("bundleScore", { n: token.bundleScore.score })}
             </Badge>
           )}
           <SocialLinks
@@ -380,17 +382,17 @@ export default function TokenPage() {
 
         {/* 市值打头 + 池子/成交额/手续费/供应量/税率 | 右侧价格与涨幅不动 */}
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
-          <div title="市值" style={{ fontSize: 22, fontWeight: 800, fontVariantNumeric: "tabular-nums", letterSpacing: -0.3, color: "#eaecef" }}>
+          <div title={tr("mcap")} style={{ fontSize: 22, fontWeight: 800, fontVariantNumeric: "tabular-nums", letterSpacing: -0.3, color: "#eaecef" }}>
             {fmtMcapUsd(mcapEth, ethUsd)}
           </div>
-          <Metric label="池子" value={poolText} hint="流动池报价资产" />
-          <Metric label="24h成交额" value={vol24Text} hint="近 24 小时买卖成交额" />
-          <Metric label="总手续费" value={feeUsdText} hint="累计协议 1% + 估算 Gas，不含创建者税" />
-          <Metric label="总供应量" value="1B" hint="曲线恒定总量 10 亿枚" />
+          <Metric label={tr("pool")} value={poolText} hint={tr("poolHint")} />
+          <Metric label={tr("vol24")} value={vol24Text} hint={tr("vol24Hint")} />
+          <Metric label={tr("totalFee")} value={feeUsdText} hint={tr("feeHint")} />
+          <Metric label={tr("supply")} value="1B" hint={tr("supplyHint")} />
           <Metric
-            label="总税率"
+            label={tr("totalTax")}
             value={`${fmtTaxPct(buyTaxShown)} / ${fmtTaxPct(sellTaxShown)}`}
-            hint="买税 / 卖税"
+            hint={tr("taxHint")}
           />
           <div style={{ textAlign: "right", minWidth: 128, paddingLeft: 4 }}>
             <div style={{ display: "flex", alignItems: "baseline", justifyContent: "flex-end", gap: 8 }}>
@@ -471,7 +473,7 @@ export default function TokenPage() {
             <div
               className="chart-resize"
               onPointerDown={startChartResize}
-              title="拖动调整 K 线高度，下方交易历史与聊天跟着变"
+              title={tr("dragChartH")}
             />
             <div style={{ height: bottomH, minHeight: 180, flexShrink: 0, display: "flex", minWidth: 0 }}>
               <div style={{ flex: 1, minWidth: 180, minHeight: 0, height: "100%" }}>
@@ -480,7 +482,7 @@ export default function TokenPage() {
               <div
                 className="chat-resize"
                 onPointerDown={startChatResize}
-                title="左右拖动：缩小聊天可加宽交易历史"
+                title={tr("dragChatW")}
               />
               <div style={{ width: chatW, minWidth: 160, flexShrink: 0, minHeight: 0, height: "100%" }}>
                 <ChatBox chainId={CHAIN_ID} tokenAddress={address} />
@@ -489,7 +491,7 @@ export default function TokenPage() {
             <div
               className="chart-resize"
               onPointerDown={startBottomResize}
-              title="拖动调整交易历史与聊天的高度"
+              title={tr("dragBottomH")}
             />
           </div>
           {/* 右:交易面板按内容撑开(不裁切),合约安全跟在下方、不跟 K 线拉伸 */}

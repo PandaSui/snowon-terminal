@@ -12,6 +12,8 @@ import { LastActiveTokens, PositionPnlLists } from "@/components/PositionPnlList
 import { QuoteUnitToggle } from "@/components/QuoteUnitToggle";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { fmtPnl, useQuoteUnit } from "@/lib/quoteUnit";
+import { EmojiAvatar } from "@/components/EmojiAvatar";
+import { useT } from "@/lib/locale";
 
 /* ────────────────────────── 类型 ────────────────────────── */
 
@@ -51,6 +53,7 @@ function shortAddr(a: string) {
 /* ────────────────────────── 资料卡 ────────────────────────── */
 
 function ProfileCard({ address, readOnly }: { address: string; readOnly?: boolean }) {
+  const tr = useT();
   const [username, setUsername] = useState("");
   const [twitter, setTwitter] = useState("");
   const [savedAt, setSavedAt] = useState(0);
@@ -82,10 +85,10 @@ function ProfileCard({ address, readOnly }: { address: string; readOnly?: boolea
         body: JSON.stringify({ address, username, twitter }),
       });
       const body = await readJson<{ ok?: boolean; error?: string }>(r);
-      if (!r.ok || !body.ok) throw new Error(body.error ?? "保存失败");
+      if (!r.ok || !body.ok) throw new Error(body.error ?? tr("saveFailed"));
       setSavedAt(Date.now());
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "保存失败");
+      setErr(e instanceof Error ? e.message : tr("saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -94,19 +97,10 @@ function ProfileCard({ address, readOnly }: { address: string; readOnly?: boolea
   return (
     <section style={{ background: PANEL, border: `1px solid ${BORDER}`, borderRadius: 10, padding: "14px 16px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
-        <div
-          style={{
-            width: 44, height: 44, borderRadius: 22, flexShrink: 0,
-            background: "linear-gradient(135deg, #f0b90b 0%, #7a5c00 100%)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 16, fontWeight: 800, color: "#000",
-          }}
-        >
-          {(username || address.slice(2, 4)).slice(0, 2).toUpperCase()}
-        </div>
+        <EmojiAvatar seed={address} size={44} />
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 15, fontWeight: 700, color: "#eaecef" }}>
-            {profile?.username || "未命名用户"}
+            {profile?.username || tr("unnamed")}
           </div>
           <div style={{ fontSize: 11, color: DIM, fontFamily: "monospace" }}>{address}</div>
           {profile?.twitter && (
@@ -124,23 +118,23 @@ function ProfileCard({ address, readOnly }: { address: string; readOnly?: boolea
 
       {readOnly ? (
         <div style={{ fontSize: 11, color: DIM }}>
-          正在查看 TA 的主页(只读)
+          {tr("viewingOther")}
         </div>
       ) : (
         <>
           <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr auto", alignItems: "end" }}>
             <label style={{ display: "grid", gap: 4, fontSize: 11, color: DIM }}>
-              用户名
+              {tr("username")}
               <input
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                placeholder="给自己起个名字"
+                placeholder={tr("namePh")}
                 maxLength={24}
                 style={inputStyle}
               />
             </label>
             <label style={{ display: "grid", gap: 4, fontSize: 11, color: DIM }}>
-              绑定推特(handle,不含 @)
+              {tr("twitterBind")}
               <input
                 value={twitter}
                 onChange={(e) => setTwitter(e.target.value)}
@@ -158,14 +152,14 @@ function ProfileCard({ address, readOnly }: { address: string; readOnly?: boolea
                 opacity: saving ? 0.6 : 1,
               }}
             >
-              {saving ? "保存中…" : "保存"}
+              {saving ? tr("saving") : tr("save")}
             </button>
           </div>
           <div style={{ marginTop: 6, fontSize: 11, minHeight: 14 }}>
             {err && <span style={{ color: BAD }}>{err}</span>}
-            {!err && savedAt > 0 && <span style={{ color: OK }}>✓ 已保存</span>}
+            {!err && savedAt > 0 && <span style={{ color: OK }}>{tr("saved")}</span>}
             {!err && savedAt === 0 && (
-              <span style={{ color: DIM }}>推特为手动绑定(handle 直填),暂不做 OAuth 验证</span>
+              <span style={{ color: DIM }}>{tr("twitterManual")}</span>
             )}
           </div>
         </>
@@ -191,6 +185,7 @@ function StatCard({ label, value, sub, color }: { label: string; value: string; 
 /* ────────────────────────── PNL 日历 ────────────────────────── */
 
 function PnlCalendar({ pnl }: { pnl: PnlData }) {
+  const tr = useT();
   const [unit] = useQuoteUnit();
   const { data: eth } = useQuery({
     queryKey: ["eth-price"],
@@ -236,7 +231,7 @@ function PnlCalendar({ pnl }: { pnl: PnlData }) {
   return (
     <section style={{ background: PANEL, border: `1px solid ${BORDER}`, borderRadius: 8, padding: "8px 10px", minWidth: 0, display: "flex", flexDirection: "column" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-        <span style={{ fontSize: 11, fontWeight: 700 }}>📅 盈亏日历</span>
+        <span style={{ fontSize: 11, fontWeight: 700 }}>{tr("calendar")}</span>
         <span style={{ marginLeft: "auto", display: "flex", gap: 4, alignItems: "center" }}>
           <QuoteUnitToggle size={13} />
           <button onClick={() => shift(-1)} style={navBtn}>‹</button>
@@ -248,7 +243,7 @@ function PnlCalendar({ pnl }: { pnl: PnlData }) {
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2, fontSize: 9, color: DIM, textAlign: "center", marginBottom: 3 }}>
-        {["一", "二", "三", "四", "五", "六", "日"].map((d) => <span key={d}>{d}</span>)}
+        {([1, 2, 3, 4, 5, 6, 7] as const).map((d) => <span key={d}>{tr(`week${d}`)}</span>)}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2 }}>
         {cells.map((d, i) => {
@@ -285,7 +280,7 @@ function PnlCalendar({ pnl }: { pnl: PnlData }) {
           display: "flex", justifyContent: "space-between", fontSize: 10,
         }}
       >
-        <span style={{ color: DIM }}>{month + 1}月</span>
+        <span style={{ color: DIM }}>{tr("monthN", { n: month + 1 })}</span>
         <b style={{ color: monthTotal >= 0 ? OK : BAD, fontVariantNumeric: "tabular-nums" }}>
           {fmtPnl(monthTotal, unit, ethUsd)}
         </b>
@@ -302,6 +297,7 @@ const navBtn: React.CSSProperties = {
 /* ────────────────────────── 页面 ────────────────────────── */
 
 function ProfilePageInner() {
+  const tr = useT();
   const [unit] = useQuoteUnit();
   const { data: eth } = useQuery({
     queryKey: ["eth-price"],
@@ -353,7 +349,7 @@ function ProfilePageInner() {
             background: GOLD, color: "#000", fontWeight: 700, fontSize: 12,
           }}
         >
-          {authenticated ? `${shortAddr(ownAddress ?? "")}` : "连接钱包"}
+          {authenticated ? `${shortAddr(ownAddress ?? "")}` : tr("connectWallet")}
         </button>
       </header>
 
@@ -364,13 +360,13 @@ function ProfilePageInner() {
             padding: "60px 20px", textAlign: "center", color: DIM, fontSize: 13,
           }}
         >
-          连接钱包后查看个人资产与战绩
+          {tr("connectToSee")}
           <div style={{ marginTop: 14 }}>
             <button
               onClick={login}
               style={{ padding: "9px 26px", border: 0, borderRadius: 6, background: GOLD, fontWeight: 700, cursor: "pointer" }}
             >
-              连接钱包
+              {tr("connectWallet")}
             </button>
           </div>
         </div>
@@ -383,25 +379,25 @@ function ProfilePageInner() {
           </div>
           <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}>
             <StatCard
-              label="胜率(已平仓代币)"
+              label={tr("winrateClosed")}
               value={pnl?.winrate.pct != null ? `${pnl.winrate.pct}%` : "-"}
-              sub={pnl ? `盈 ${pnl.winrate.wins} · 亏 ${pnl.winrate.losses}` : undefined}
+              sub={pnl ? tr("winLoss", { wins: pnl.winrate.wins, losses: pnl.winrate.losses }) : undefined}
               color={pnl?.winrate.pct != null ? (pnl.winrate.pct >= 50 ? OK : BAD) : undefined}
             />
             <StatCard
-              label="7 天 PNL"
+              label={tr("pnl7d")}
               value={pnl ? fmtPnl(Number(pnl.pnl.d7), unit, ethUsd) : isFetching ? "…" : "-"}
               color={pnl ? pnlColor(pnl.pnl.d7) : undefined}
             />
             <StatCard
-              label="30 天 PNL"
+              label={tr("pnl30d")}
               value={pnl ? fmtPnl(Number(pnl.pnl.d30), unit, ethUsd) : isFetching ? "…" : "-"}
               color={pnl ? pnlColor(pnl.pnl.d30) : undefined}
             />
             <StatCard
-              label="总 PNL(已实现)"
+              label={tr("pnlTotalRealized")}
               value={pnl ? fmtPnl(Number(pnl.pnl.total), unit, ethUsd) : isFetching ? "…" : "-"}
-              sub={pnl ? `共 ${pnl.tradeCount} 笔成交` : undefined}
+              sub={pnl ? tr("tradesN", { n: pnl.tradeCount }) : undefined}
               color={pnl ? pnlColor(pnl.pnl.total) : undefined}
             />
           </div>
@@ -421,7 +417,7 @@ function ProfilePageInner() {
           </div>
 
           <div style={{ fontSize: 11, color: DIM }}>
-            口径:已实现盈亏(加权平均成本法,仅统计卖出结算),不含未平仓浮动盈亏;日历按 UTC+8 分日,每月最后一天结算。
+            {tr("pnlNote")}
           </div>
         </div>
       )}

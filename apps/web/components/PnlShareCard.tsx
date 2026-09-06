@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { usePrivy } from "@privy-io/react-auth";
 import { useQuery } from "@tanstack/react-query";
 import { readJson } from "@/lib/http";
+import { useT } from "@/lib/locale";
 
 interface Position {
   tokenAddress: string;
@@ -14,7 +15,6 @@ interface Position {
   valueEth: string | null;
 }
 
-const SLOGAN = "SnowOn Terminal · 发现下一个 100x";
 const CARD_W = 720;
 const CARD_H = 420;
 
@@ -41,6 +41,10 @@ async function drawCard(opts: {
   pct: string;
   addr: string;
   positive: boolean;
+  buyPriceLabel: string;
+  investLabel: string;
+  profitAmtLabel: string;
+  slogan: string;
 }): Promise<Blob> {
   const canvas = document.createElement("canvas");
   canvas.width = CARD_W;
@@ -77,14 +81,14 @@ async function drawCard(opts: {
 
   ctx.fillStyle = "#b7bcc5";
   ctx.font = "600 18px system-ui, sans-serif";
-  ctx.fillText(`买入价格  ${opts.buyPrice}`, 36, 240);
-  ctx.fillText(`投入金额  ${opts.amount}`, 36, 272);
+  ctx.fillText(`${opts.buyPriceLabel}  ${opts.buyPrice}`, 36, 240);
+  ctx.fillText(`${opts.investLabel}  ${opts.amount}`, 36, 272);
   ctx.fillStyle = opts.positive ? "#0ecb81" : "#f6465d";
-  ctx.fillText(`盈利金额  ${opts.pnl}`, 36, 304);
+  ctx.fillText(`${opts.profitAmtLabel}  ${opts.pnl}`, 36, 304);
 
   ctx.fillStyle = "#f0b90b";
   ctx.font = "600 16px system-ui, sans-serif";
-  ctx.fillText(SLOGAN, 36, CARD_H - 48);
+  ctx.fillText(opts.slogan, 36, CARD_H - 48);
 
   ctx.fillStyle = "#848e9c";
   ctx.font = "500 16px ui-monospace, monospace";
@@ -97,6 +101,7 @@ async function drawCard(opts: {
 
 /** 我的 PNL 卡:自定义背景图,卡片含买入价/金额/盈利/%/标语/截断地址 */
 export function PnlShareCard({ tokenAddress, symbol }: { tokenAddress: string; symbol: string }) {
+  const tr = useT();
   const { authenticated, user } = usePrivy();
   const address = user?.wallet?.address?.toLowerCase();
   const [open, setOpen] = useState(false);
@@ -140,7 +145,15 @@ export function PnlShareCard({ tokenAddress, symbol }: { tokenAddress: string; s
 
   async function renderBlob(): Promise<Blob> {
     const bg = bgUrl ? await loadImage(bgUrl) : null;
-    return drawCard({ bg, symbol, ...stats });
+    return drawCard({
+      bg,
+      symbol,
+      ...stats,
+      buyPriceLabel: tr("buyPriceLabel"),
+      investLabel: tr("investLabel"),
+      profitAmtLabel: tr("profitAmtLabel"),
+      slogan: tr("slogan"),
+    });
   }
 
   useEffect(() => {
@@ -160,7 +173,7 @@ export function PnlShareCard({ tokenAddress, symbol }: { tokenAddress: string; s
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, bgUrl, pos?.tokenAddress, stats.pnl, stats.pct]);
+  }, [open, bgUrl, pos?.tokenAddress, stats.pnl, stats.pct, tr]);
 
   if (!authenticated || !address || !pos) return null;
 
@@ -179,7 +192,13 @@ export function PnlShareCard({ tokenAddress, symbol }: { tokenAddress: string; s
       await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
     } catch {
       await navigator.clipboard.writeText(
-        `我在 SnowOn Terminal 交易 $${symbol} · 买入 ${stats.buyPrice} · ${stats.pnl} (${stats.pct}) ${SLOGAN}`,
+        tr("shareCaption", {
+          symbol,
+          buy: stats.buyPrice,
+          pnl: stats.pnl,
+          pct: stats.pct,
+          slogan: tr("slogan"),
+        }),
       );
     }
   }
@@ -194,7 +213,7 @@ export function PnlShareCard({ tokenAddress, symbol }: { tokenAddress: string; s
           background: positive ? "rgba(14,203,129,0.06)" : "rgba(246,70,93,0.06)",
         }}
       >
-        <span style={{ color: "#848e9c" }}>我的 PNL</span>
+        <span style={{ color: "#848e9c" }}>{tr("myPnl")}</span>
         <span style={{ fontWeight: 800, color: positive ? "#0ecb81" : "#f6465d", fontVariantNumeric: "tabular-nums" }}>
           {stats.pnl} ({stats.pct})
         </span>
@@ -205,7 +224,7 @@ export function PnlShareCard({ tokenAddress, symbol }: { tokenAddress: string; s
             borderRadius: 6, border: "1px solid #2b3139", background: "transparent", color: "#848e9c",
           }}
         >
-          📤 分享卡片
+          {tr("shareCard")}
         </button>
       </div>
 
@@ -225,15 +244,15 @@ export function PnlShareCard({ tokenAddress, symbol }: { tokenAddress: string; s
             }}
           >
             <div style={{ padding: "12px 14px", borderBottom: "1px solid #1e2329", fontWeight: 700, fontSize: 13 }}>
-              分享 PNL 卡片
-              <span style={{ marginLeft: 8, fontSize: 11, color: "#5e6673", fontWeight: 400 }}>可上传自定义背景</span>
+              {tr("sharePnl")}
+              <span style={{ marginLeft: 8, fontSize: 11, color: "#5e6673", fontWeight: 400 }}>{tr("customBg")}</span>
             </div>
             <div style={{ padding: 14 }}>
               {preview ? (
                 <img src={preview} alt="PNL card" style={{ width: "100%", borderRadius: 8, display: "block" }} />
               ) : (
                 <div style={{ height: 200, display: "flex", alignItems: "center", justifyContent: "center", color: "#5e6673", fontSize: 12 }}>
-                  {busy ? "生成中…" : "预览"}
+                  {busy ? tr("generating") : tr("preview")}
                 </div>
               )}
               <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
@@ -255,13 +274,13 @@ export function PnlShareCard({ tokenAddress, symbol }: { tokenAddress: string; s
                   onClick={() => fileRef.current?.click()}
                   style={shareBtn}
                 >
-                  上传背景
+                  {tr("uploadBg")}
                 </button>
-                <button onClick={() => void download()} style={shareBtn}>下载 PNG</button>
+                <button onClick={() => void download()} style={shareBtn}>{tr("downloadPng")}</button>
                 <button onClick={() => void copyImage()} style={{ ...shareBtn, background: "#f0b90b", color: "#000", border: 0 }}>
-                  复制卡片
+                  {tr("copyCard")}
                 </button>
-                <button onClick={() => setOpen(false)} style={{ ...shareBtn, marginLeft: "auto" }}>关闭</button>
+                <button onClick={() => setOpen(false)} style={{ ...shareBtn, marginLeft: "auto" }}>{tr("close")}</button>
               </div>
             </div>
           </div>

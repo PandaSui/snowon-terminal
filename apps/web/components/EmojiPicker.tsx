@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useT } from "@/lib/locale";
 
 const EMOJIS = [
   "😀", "😂", "🤣", "😅", "😊", "😍", "😘", "😎",
@@ -12,6 +13,7 @@ const EMOJIS = [
 
 /** 轻量 emoji 面板,点选插入输入框 */
 export function EmojiPicker({ onPick }: { onPick: (emoji: string) => void }) {
+  const tr = useT();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -29,7 +31,7 @@ export function EmojiPicker({ onPick }: { onPick: (emoji: string) => void }) {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        title="表情"
+        title={tr("emoji")}
         style={{
           width: 36, height: "100%", minHeight: 36, border: 0, cursor: "pointer",
           background: open ? "#1c1f26" : "transparent", color: open ? "#f0b90b" : "#848e9c",

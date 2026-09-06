@@ -9,6 +9,7 @@ import { txUrl } from "@/lib/explorers";
 import { fmtAmount, fmtPnl, fmtPrice as fmtPx, useQuoteUnit, type QuoteUnit } from "@/lib/quoteUnit";
 import { QuoteUnitToggle } from "./QuoteUnitToggle";
 import { TokenLogo } from "./TokenLogo";
+import { formatTimeAgo, useLocale, useT } from "@/lib/locale";
 
 export interface PositionRow {
   tokenAddress: string;
@@ -74,11 +75,12 @@ type Dir = "desc" | "asc";
 type Tab = "open" | "closed";
 
 function SortBtn({ dir, onToggle }: { dir: Dir; onToggle: () => void }) {
+  const tr = useT();
   return (
     <button
       type="button"
       onClick={onToggle}
-      title={dir === "desc" ? "盈亏从高到低,点击改为从低到高" : "盈亏从低到高,点击改为从高到低"}
+      title={dir === "desc" ? tr("pnlHighToLow") : tr("pnlLowToHigh")}
       style={{
         display: "inline-flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
         width: 18, height: 22, padding: 0, marginLeft: 4, cursor: "pointer",
@@ -131,6 +133,7 @@ function TokenPnlRow({
 }: {
   p: PositionRow; kind: "open" | "closed"; unit: QuoteUnit; ethUsd?: number;
 }) {
+  const tr = useT();
   const pnl = pnlOf(p, kind);
   const pct = pctOf(p, kind);
   const color = pnl > 0 ? OK : pnl < 0 ? BAD : DIM;
@@ -156,13 +159,13 @@ function TokenPnlRow({
           </span>
           <span style={{ fontSize: 10, color: DIM }}>
             {kind === "open"
-              ? `${n(p.balanceWhole).toLocaleString("en-US", { maximumFractionDigits: 0 })} 枚`
-              : "已清仓"}
+              ? tr("nPieces", { n: n(p.balanceWhole).toLocaleString("en-US", { maximumFractionDigits: 0 }) })
+              : tr("closed")}
           </span>
         </Link>
         <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 8 }}>
-          <FeatherTx hash={p.lastBuyTx} title="最近买入" />
-          <FeatherTx hash={p.lastSellTx} title="最近卖出" />
+          <FeatherTx hash={p.lastBuyTx} title={tr("lastBuy")} />
+          <FeatherTx hash={p.lastSellTx} title={tr("lastSell")} />
         </span>
       </div>
       <div
@@ -173,10 +176,10 @@ function TokenPnlRow({
           rowGap: 6,
         }}
       >
-        <Metric label="买入金额" value={fmtAmount(buyAmt, unit, ethUsd)} />
-        <Metric label="买入价格" value={buyPx ? fmtPx(buyPx, unit, ethUsd) : "—"} />
-        <Metric label="卖出价格" value={p.avgSellPriceEth ? fmtPx(p.avgSellPriceEth, unit, ethUsd) : "—"} />
-        <Metric label="盈亏" value={`${fmtPnl(pnl, unit, ethUsd)}${pct != null ? `  ${fmtPct(pct)}` : ""}`} color={color} />
+        <Metric label={tr("buyAmt")} value={fmtAmount(buyAmt, unit, ethUsd)} />
+        <Metric label={tr("buyPx")} value={buyPx ? fmtPx(buyPx, unit, ethUsd) : "—"} />
+        <Metric label={tr("sellPx")} value={p.avgSellPriceEth ? fmtPx(p.avgSellPriceEth, unit, ethUsd) : "—"} />
+        <Metric label={tr("pnl")} value={`${fmtPnl(pnl, unit, ethUsd)}${pct != null ? `  ${fmtPct(pct)}` : ""}`} color={color} />
       </div>
     </div>
   );
@@ -184,6 +187,7 @@ function TokenPnlRow({
 
 /** 个人页日历下方:持仓 / 清仓 Tab 切换,按盈亏箭头排序 */
 export function PositionPnlLists({ address }: { address: string }) {
+  const tr = useT();
   const [tab, setTab] = useState<Tab>("open");
   const [dir, setDir] = useState<Dir>("desc");
   const [unit] = useQuoteUnit();
@@ -240,32 +244,32 @@ export function PositionPnlLists({ address }: { address: string }) {
     >
       <div style={{ display: "flex", alignItems: "stretch", borderBottom: `1px solid ${BORDER}`, margin: "0 -12px", padding: "0 4px" }}>
         <button type="button" onClick={() => setTab("open")} style={tabBtn("open")}>
-          持仓
+          {tr("openPos")}
           <span style={{ marginLeft: 4, fontSize: 10, color: DIM, fontWeight: 600 }}>{holdings.length}</span>
         </button>
         <button type="button" onClick={() => setTab("closed")} style={tabBtn("closed")}>
-          清仓
+          {tr("closedPos")}
           <span style={{ marginLeft: 4, fontSize: 10, color: DIM, fontWeight: 600 }}>{closed.length}</span>
         </button>
         <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 10, color: DIM, paddingRight: 8 }}>
           <QuoteUnitToggle size={14} />
-          盈亏
+          {tr("pnl")}
           <SortBtn dir={dir} onToggle={() => setDir((d) => (d === "desc" ? "asc" : "desc"))} />
         </span>
       </div>
 
       <div className="col-scroll" style={{ flex: 1, overflowY: "auto", minHeight: 0, maxHeight: 320 }}>
         {isFetching && !data && (
-          <div style={{ fontSize: 11, color: DIM, textAlign: "center", padding: "14px 0" }}>加载持仓…</div>
+          <div style={{ fontSize: 11, color: DIM, textAlign: "center", padding: "14px 0" }}>{tr("loadPos")}</div>
         )}
         {sorted.length === 0 && data && (
-          <div style={{ fontSize: 11, color: DIM, textAlign: "center", padding: "14px 0" }}>暂无记录</div>
+          <div style={{ fontSize: 11, color: DIM, textAlign: "center", padding: "14px 0" }}>{tr("noRecords")}</div>
         )}
         {sorted.map((p) => <TokenPnlRow key={p.tokenAddress} p={p} kind={kind} unit={unit} ethUsd={ethUsd} />)}
       </div>
       {sorted.length > 0 && (
         <div style={{ display: "flex", justifyContent: "space-between", paddingTop: 6, fontSize: 10 }}>
-          <span style={{ color: DIM }}>合计 {sorted.length} 个</span>
+          <span style={{ color: DIM }}>{tr("countN", { n: sorted.length })}</span>
           <b style={{ color: sum >= 0 ? OK : BAD, fontVariantNumeric: "tabular-nums" }}>{fmtPnl(sum, unit, ethUsd)}</b>
         </div>
       )}
@@ -273,19 +277,10 @@ export function PositionPnlLists({ address }: { address: string }) {
   );
 }
 
-function timeAgo(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  const t = new Date(iso.includes("T") ? iso : iso.replace(" ", "T")).getTime();
-  if (!Number.isFinite(t)) return "—";
-  const s = Math.max(1, Math.floor((Date.now() - t) / 1000));
-  if (s < 60) return `${s}秒前`;
-  if (s < 3600) return `${Math.floor(s / 60)}分钟前`;
-  if (s < 86400) return `${Math.floor(s / 3600)}小时前`;
-  return `${Math.floor(s / 86400)}天前`;
-}
-
 /** 最近有成交的代币,按 lastTradeAt 倒序 */
 export function LastActiveTokens({ address }: { address: string }) {
+  const tr = useT();
+  const [locale] = useLocale();
   const [unit] = useQuoteUnit();
   const { data: eth } = useQuery({
     queryKey: ["eth-price"],
@@ -323,15 +318,15 @@ export function LastActiveTokens({ address }: { address: string }) {
       }}
     >
       <div style={{ display: "flex", alignItems: "center", marginBottom: 6 }}>
-        <span style={{ fontSize: 11, fontWeight: 700 }}>⏱ 最后活跃</span>
+        <span style={{ fontSize: 11, fontWeight: 700 }}>{tr("lastActive")}</span>
         <span style={{ marginLeft: "auto" }}><QuoteUnitToggle size={14} /></span>
       </div>
       <div className="col-scroll" style={{ flex: 1, overflowY: "auto", minHeight: 0, maxHeight: 320 }}>
         {isFetching && !data && (
-          <div style={{ fontSize: 11, color: DIM, textAlign: "center", padding: "14px 0" }}>加载中…</div>
+          <div style={{ fontSize: 11, color: DIM, textAlign: "center", padding: "14px 0" }}>{tr("loading")}</div>
         )}
         {rows.length === 0 && data && (
-          <div style={{ fontSize: 11, color: DIM, textAlign: "center", padding: "14px 0" }}>暂无成交</div>
+          <div style={{ fontSize: 11, color: DIM, textAlign: "center", padding: "14px 0" }}>{tr("noTrades")}</div>
         )}
         {rows.map((p) => {
           const closed = p.closed || n(p.balanceWhole) <= 0;
@@ -355,8 +350,8 @@ export function LastActiveTokens({ address }: { address: string }) {
                   {fmtPnl(pnl, unit, ethUsd)}
                 </span>
               </Link>
-              <span style={{ fontSize: 9, color: DIM, whiteSpace: "nowrap" }}>{timeAgo(p.lastTradeAt)}</span>
-              <FeatherTx hash={p.lastSellTx || p.lastBuyTx} title="最近成交" />
+              <span style={{ fontSize: 9, color: DIM, whiteSpace: "nowrap" }}>{p.lastTradeAt ? formatTimeAgo(p.lastTradeAt, locale) : "—"}</span>
+              <FeatherTx hash={p.lastSellTx || p.lastBuyTx} title={tr("lastTradeTip")} />
             </div>
           );
         })}

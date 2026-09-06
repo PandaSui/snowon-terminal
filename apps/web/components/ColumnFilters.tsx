@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useT } from "@/lib/locale";
 import type { HomeToken } from "./TokenCard";
 
 export type SecurityFilter = "all" | "safe" | "risky";
@@ -105,6 +106,7 @@ export function ColumnFilterButton({
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const n = filterActiveCount(value);
+  const tr = useT();
 
   useEffect(() => {
     if (!open) return;
@@ -124,12 +126,12 @@ export function ColumnFilterButton({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        title="栏目筛选"
+        title={tr("colFilter")}
         style={{
           ...chip(open || n > 0), padding: "1px 7px", fontSize: 10,
         }}
       >
-        筛选{n > 0 ? ` ${n}` : ""}
+        {tr("filter")}{n > 0 ? ` ${n}` : ""}
       </button>
       {open && (
         <div
@@ -140,17 +142,17 @@ export function ColumnFilterButton({
             boxShadow: "0 12px 32px rgba(0,0,0,0.55)", fontSize: 11, color: "#848e9c",
           }}
         >
-          <div style={{ marginBottom: 6, color: "#eaecef", fontWeight: 700 }}>市值 (USD)</div>
+          <div style={{ marginBottom: 6, color: "#eaecef", fontWeight: 700 }}>{tr("mcapUsd")}</div>
           <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
-            <input value={value.mcapMin} onChange={(e) => patch({ mcapMin: e.target.value })} placeholder="最低" style={input} />
-            <input value={value.mcapMax} onChange={(e) => patch({ mcapMax: e.target.value })} placeholder="最高" style={input} />
+            <input value={value.mcapMin} onChange={(e) => patch({ mcapMin: e.target.value })} placeholder={tr("min")} style={input} />
+            <input value={value.mcapMax} onChange={(e) => patch({ mcapMax: e.target.value })} placeholder={tr("max")} style={input} />
           </div>
 
-          <div style={{ marginBottom: 6, color: "#eaecef", fontWeight: 700 }}>安全性</div>
+          <div style={{ marginBottom: 6, color: "#eaecef", fontWeight: 700 }}>{tr("security")}</div>
           <div style={{ display: "flex", gap: 4, marginBottom: 10 }}>
             {(["all", "safe", "risky"] as const).map((k) => (
               <button key={k} type="button" onClick={() => patch({ security: k })} style={chip(value.security === k)}>
-                {k === "all" ? "全部" : k === "safe" ? "安全" : "高风险"}
+                {k === "all" ? tr("all") : k === "safe" ? tr("safe") : tr("highRisk")}
               </button>
             ))}
           </div>
@@ -161,22 +163,22 @@ export function ColumnFilterButton({
               checked={value.dedupe}
               onChange={(e) => patch({ dedupe: e.target.checked })}
             />
-            去重(同创建者只留一条)
+            {tr("dedupe")}
           </label>
 
-          <div style={{ marginBottom: 6, color: "#eaecef", fontWeight: 700 }}>Dev 清仓</div>
+          <div style={{ marginBottom: 6, color: "#eaecef", fontWeight: 700 }}>{tr("devDump")}</div>
           <div style={{ display: "flex", gap: 4, marginBottom: 10 }}>
             {(["all", "held", "dumped"] as const).map((k) => (
               <button key={k} type="button" onClick={() => patch({ devDump: k })} style={chip(value.devDump === k)}>
-                {k === "all" ? "全部" : k === "held" ? "未清仓" : "已清仓"}
+                {k === "all" ? tr("all") : k === "held" ? tr("held") : tr("dumped")}
               </button>
             ))}
           </div>
 
-          <div style={{ marginBottom: 6, color: "#eaecef", fontWeight: 700 }}>发布时间 (分钟)</div>
+          <div style={{ marginBottom: 6, color: "#eaecef", fontWeight: 700 }}>{tr("ageMinutes")}</div>
           <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
-            <input value={value.ageMin} onChange={(e) => patch({ ageMin: e.target.value })} placeholder="最短" style={input} />
-            <input value={value.ageMax} onChange={(e) => patch({ ageMax: e.target.value })} placeholder="最长" style={input} />
+            <input value={value.ageMin} onChange={(e) => patch({ ageMin: e.target.value })} placeholder={tr("shortest")} style={input} />
+            <input value={value.ageMax} onChange={(e) => patch({ ageMax: e.target.value })} placeholder={tr("longest")} style={input} />
           </div>
 
           {n > 0 && (
@@ -185,7 +187,7 @@ export function ColumnFilterButton({
               onClick={() => onChange(EMPTY_FILTER)}
               style={{ ...chip(false), width: "100%" }}
             >
-              清除筛选
+              {tr("clearFilter")}
             </button>
           )}
         </div>

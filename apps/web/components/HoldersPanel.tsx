@@ -6,6 +6,8 @@ import { useQuery } from "@tanstack/react-query";
 import { readJson } from "@/lib/http";
 import { addressUrl } from "@/lib/explorers";
 import { fmtPriceUsd, fmtUsdCompact } from "@/lib/quoteUnit";
+import { useT } from "@/lib/locale";
+import { EmojiAvatar } from "./EmojiAvatar";
 
 const CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? 4663);
 const COL = "22px minmax(108px,1.3fr) 64px 78px 72px 78px minmax(88px,1fr)";
@@ -128,9 +130,10 @@ function valueUsd(eth: string | null | undefined, ethUsd?: number): string {
 }
 
 function DevMark({ alt }: { alt?: boolean }) {
+  const tr = useT();
   return (
     <span
-      title={alt ? "开发小号:资金链与开发者关联(开发者或其小号出资)" : "开发者:代币创建者"}
+      title={alt ? tr("devAltTip") : tr("devTip")}
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -147,12 +150,13 @@ function DevMark({ alt }: { alt?: boolean }) {
         flexShrink: 0,
       }}
     >
-      {alt ? "小号" : "开发"}
+      {alt ? tr("devAlt") : tr("dev")}
     </span>
   );
 }
 
 function RiskMark({ kind, title }: { kind: "phish" | "bundle"; title: string }) {
+  const tr = useT();
   return (
     <span
       title={title}
@@ -172,12 +176,13 @@ function RiskMark({ kind, title }: { kind: "phish" | "bundle"; title: string }) 
         flexShrink: 0,
       }}
     >
-      {kind === "phish" ? "钓" : "捆"}
+      {kind === "phish" ? tr("phishShort") : tr("bundleShort")}
     </span>
   );
 }
 
 function Head() {
+  const tr = useT();
   return (
     <div
       className="holders-row"
@@ -194,18 +199,19 @@ function Head() {
       }}
     >
       <span>#</span>
-      <span>钱包</span>
-      <span style={{ textAlign: "right" }}>占比</span>
-      <span style={{ textAlign: "right" }}>数量</span>
-      <span style={{ textAlign: "right" }}>价值</span>
-      <span style={{ textAlign: "right" }}>成本</span>
-      <span style={{ textAlign: "right" }}>盈亏</span>
+      <span>{tr("walletCol")}</span>
+      <span style={{ textAlign: "right" }}>{tr("share")}</span>
+      <span style={{ textAlign: "right" }}>{tr("qty")}</span>
+      <span style={{ textAlign: "right" }}>{tr("value")}</span>
+      <span style={{ textAlign: "right" }}>{tr("cost")}</span>
+      <span style={{ textAlign: "right" }}>{tr("pnl")}</span>
     </div>
   );
 }
 
 /** 持有者 + 流动池置顶 + 成本/盈亏 + 同资金来源虚线 + 钓鱼/捆绑红标 */
 export function HoldersPanel({ address, embedded, ethUsd }: { address: string; embedded?: boolean; ethUsd?: number }) {
+  const tr = useT();
   const { data } = useQuery({
     queryKey: ["holders", address],
     queryFn: async () => {
@@ -226,25 +232,25 @@ export function HoldersPanel({ address, embedded, ethUsd }: { address: string; e
     <>
       {!embedded && (
         <div style={{ padding: "10px 12px", borderBottom: "1px solid #1e2329", fontSize: 13, fontWeight: 700 }}>
-          🐳 持有者
+          {tr("holders")}
           <span style={{ marginLeft: 8, fontSize: 11, color: "#5e6673", fontWeight: 400 }}>
-            {data ? `${data.holderCount} 个地址` : "加载中…"}
-            {flagged > 0 && <span style={{ color: "#f6465d", marginLeft: 6 }}>{flagged} 标红</span>}
+            {data ? tr("addrCount", { n: data.holderCount }) : tr("loading")}
+            {flagged > 0 && <span style={{ color: "#f6465d", marginLeft: 6 }}>{tr("flagged", { n: flagged })}</span>}
           </span>
         </div>
       )}
 
       {embedded && data && (
         <div style={{ padding: "6px 10px 0", fontSize: 11, color: "#5e6673" }}>
-          {data.holderCount} 个地址
-          {flagged > 0 && <span style={{ color: "#f6465d", marginLeft: 6 }}>{flagged} 标红</span>}
+          {tr("addrCount", { n: data.holderCount })}
+          {flagged > 0 && <span style={{ color: "#f6465d", marginLeft: 6 }}>{tr("flagged", { n: flagged })}</span>}
         </div>
       )}
 
       {top10Pct != null && (
         <div style={{ padding: "8px 12px", borderBottom: "1px solid #1e2329", fontSize: 11 }}>
           <div style={{ display: "flex", justifyContent: "space-between", color: "#848e9c" }}>
-            <span>Top10 集中度（占总量）</span>
+            <span>{tr("top10conc")}</span>
             <span style={{ color: riskColor, fontWeight: 700 }}>{top10Pct.toFixed(1)}%</span>
           </div>
           <div style={{ marginTop: 4, height: 4, borderRadius: 2, background: "#1e2329", overflow: "hidden" }}>
@@ -252,7 +258,7 @@ export function HoldersPanel({ address, embedded, ethUsd }: { address: string; e
           </div>
           {data?.devSharePct != null && (
             <div style={{ display: "flex", justifyContent: "space-between", color: "#848e9c", marginTop: 6 }}>
-              <span title="代币创建者 + 其资金链关联小号(两级)的合计持仓">👨‍💻 开发者系合计{data.devAltCount ? `(${data.devAltCount} 个小号)` : ""}</span>
+              <span title={tr("devClusterTip")}>{tr("devTotal")}{data.devAltCount ? tr("nAlts", { n: data.devAltCount }) : ""}</span>
               <span style={{ color: data.devSharePct > 10 ? "#f6465d" : data.devSharePct > 5 ? "#f0b90b" : "#eaecef", fontWeight: 700 }}>
                 {fmtPct(data.devSharePct)}
               </span>
@@ -260,7 +266,7 @@ export function HoldersPanel({ address, embedded, ethUsd }: { address: string; e
           )}
           {(data?.top10AvgCostEth || data?.top100AvgCostEth) && (
             <div style={{ display: "flex", justifyContent: "space-between", gap: 8, color: "#848e9c", marginTop: 6 }}>
-              <span title="前 10 / 前 100 大持仓地址的加权平均成本价(仅统计被索引的买入,转入的币成本为 0)">平均持仓价(前10 / 前100)</span>
+              <span title={tr("avgHoldTitle")}>{tr("avgHoldPx")}</span>
               <span style={{ fontWeight: 700, color: "#eaecef", fontVariantNumeric: "tabular-nums" }}>
                 {fmtPriceUsd(data.top10AvgCostEth, ethUsd)}
                 <span style={{ color: "#5e6673", fontWeight: 400 }}> / </span>
@@ -283,26 +289,26 @@ export function HoldersPanel({ address, embedded, ethUsd }: { address: string; e
         }}
       >
         <span>
-          <span style={{ color: "#f6465d", fontWeight: 800 }}>┆</span> 红虚线=同资金来源
+          <span style={{ color: "#f6465d", fontWeight: 800 }}>┆</span> {tr("redDash")}
         </span>
         <span>
-          <RiskMark kind="phish" title="钓鱼/混币钱包" /> 钓鱼
+          <RiskMark kind="phish" title={tr("phishMix")} /> {tr("phish")}
         </span>
         <span>
-          <RiskMark kind="bundle" title="捆绑钱包" /> 捆绑
+          <RiskMark kind="bundle" title={tr("bundleWallet")} /> {tr("bundle")}
         </span>
         <span>
-          <DevMark /> 开发者
+          <DevMark /> {tr("developer")}
         </span>
         <span>
-          <DevMark alt /> 开发小号
+          <DevMark alt /> {tr("devAlt")}
         </span>
-        <span>点地址看主页 · 占比按代币总量</span>
+        <span>{tr("clickAddrProfile")}</span>
       </div>
 
       {burns.length > 0 && (
         <div style={{ padding: "8px 12px", borderBottom: "1px solid #1e2329", fontSize: 11, color: "#848e9c" }}>
-          <div style={{ fontWeight: 700, color: "#f6465d", marginBottom: 4 }}>🔥 已销毁</div>
+          <div style={{ fontWeight: 700, color: "#f6465d", marginBottom: 4 }}>{tr("burned")}</div>
           {burns.map((b) => (
             <div key={b.address} style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "2px 0" }}>
               <span title={b.address}>{b.label} {shortAddr(b.address)}</span>
@@ -313,7 +319,7 @@ export function HoldersPanel({ address, embedded, ethUsd }: { address: string; e
           ))}
           {data?.burnedWhole != null && burns.length > 1 && (
             <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4, color: "#f6465d" }}>
-              <span>合计</span>
+              <span>{tr("total")}</span>
               <span>{fmtAmt(data.burnedWhole)} · {fmtPct(data.burnedPct ?? 0)}</span>
             </div>
           )}
@@ -326,7 +332,7 @@ export function HoldersPanel({ address, embedded, ethUsd }: { address: string; e
         {pool && (
           <div
             className="holder-pool holders-row"
-            title={pool.kind === "v4" ? "毕业后 V4 池中的代币" : "曲线未售出的代币储备"}
+            title={pool.kind === "v4" ? tr("poolV4Tokens") : tr("curveUnsold")}
             style={{
               display: "grid",
               gridTemplateColumns: COL,
@@ -338,12 +344,12 @@ export function HoldersPanel({ address, embedded, ethUsd }: { address: string; e
           >
             <span style={{ color: "#00c3ff", fontWeight: 800 }}>💧</span>
             <span style={{ minWidth: 0 }}>
-              <span style={{ color: "#eaecef", fontWeight: 800 }}>流动池</span>
+              <span style={{ color: "#eaecef", fontWeight: 800 }}>{tr("liqPool")}</span>
               {pool.locked && (
-                <span style={{ marginLeft: 6, color: "#0ecb81", fontSize: 10, fontWeight: 700 }}>锁</span>
+                <span style={{ marginLeft: 6, color: "#0ecb81", fontSize: 10, fontWeight: 700 }}>{tr("locked")}</span>
               )}
               <span style={{ display: "block", fontSize: 10, color: "#5e6673" }}>
-                {pool.kind === "v4" ? "V4 池" : "曲线储备"}
+                {pool.kind === "v4" ? tr("v4pool") : tr("curveReserve")}
                 {pool.wallet && pool.wallet.startsWith("0x") && (
                   <> · {shortAddr(pool.wallet)}</>
                 )}
@@ -366,13 +372,13 @@ export function HoldersPanel({ address, embedded, ethUsd }: { address: string; e
         )}
 
         {holders.length === 0 && !pool && (
-          <div style={{ color: "#5e6673", fontSize: 12, textAlign: "center", marginTop: 20 }}>暂无持仓数据</div>
+          <div style={{ color: "#5e6673", fontSize: 12, textAlign: "center", marginTop: 20 }}>{tr("noHolders")}</div>
         )}
         {holders.map((h, i) => {
           const pnl = fmtSignedUsd(h.totalPnlEth ?? h.unrealizedPnlEth, ethUsd);
           const pct = h.pnlPct == null ? null : Number(h.pnlPct) * 100;
           const clusterTip = h.sameFunder
-            ? `同资金来源 ${h.clusterSize} 个地址 · 来源 ${h.firstFunder ? shortAddr(h.firstFunder) : "?"}`
+            ? tr("sameFunderN", { n: h.clusterSize, src: h.firstFunder ? shortAddr(h.firstFunder) : "?" })
             : undefined;
           const created = ageLabel(h.firstSeenAt);
           const active = ageLabel(h.lastSeenAt);
@@ -393,10 +399,11 @@ export function HoldersPanel({ address, embedded, ethUsd }: { address: string; e
             >
               <span style={{ color: i < 3 ? "#f0b90b" : "#5e6673", fontWeight: 700, fontSize: 11 }}>{i + 1}</span>
               <span style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0 }}>
+                <EmojiAvatar seed={h.wallet} size={16} />
                 <Link
                   href={`/profile?address=${h.wallet}`}
                   style={{ fontFamily: "monospace", color: "#eaecef", textDecoration: "none" }}
-                  title={`${h.wallet} · 点击查看 TA 的主页`}
+                  title={`${h.wallet} · ${tr("clickProfile")}`}
                 >
                   {shortAddr(h.wallet)}
                 </Link>
@@ -404,15 +411,15 @@ export function HoldersPanel({ address, embedded, ethUsd }: { address: string; e
                   href={addressUrl(CHAIN_ID, h.wallet)}
                   target="_blank"
                   rel="noreferrer"
-                  title="在浏览器打开"
+                  title={tr("openExplorer")}
                   style={{ color: "#3d4450", textDecoration: "none", fontSize: 10, flexShrink: 0 }}
                 >
                   ↗
                 </a>
                 {h.isDev && <DevMark />}
                 {h.isDevAlt && <DevMark alt />}
-                {h.isPhish && <RiskMark kind="phish" title="钓鱼/混币钱包" />}
-                {h.isBundle && <RiskMark kind="bundle" title={clusterTip ?? "捆绑钱包"} />}
+                {h.isPhish && <RiskMark kind="phish" title={tr("phishMix")} />}
+                {h.isBundle && <RiskMark kind="bundle" title={clusterTip ?? tr("bundleWallet")} />}
                 {(created || active) && (
                   <span style={{ color: "#5e6673", fontSize: 10, whiteSpace: "nowrap" }}>
                     {created ?? "—"}

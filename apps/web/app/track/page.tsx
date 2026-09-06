@@ -15,22 +15,18 @@ import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { QuoteUnitToggle } from "@/components/QuoteUnitToggle";
 import { useAdmins } from "@/lib/useAdmins";
 import { useIsMobile } from "@/lib/useIsMobile";
-import { t, useLocale } from "@/lib/locale";
+import { t, useLocale, useT } from "@/lib/locale";
 import { fmtPnl, fmtQuote, useQuoteUnit } from "@/lib/quoteUnit";
 import { addressUrl } from "@/lib/explorers";
 import type { HomeToken } from "@/components/TokenCard";
+import { EmojiAvatar } from "@/components/EmojiAvatar";
 import {
   IMPORT_SAMPLE,
   TRACK_LIMIT,
-  TRACKED_CHANGED_EVENT,
-  addTrackedWallets,
   formatTrackedExport,
-  loadTrackedWallets,
   parseTrackedImport,
-  patchTrackedWallet,
-  removeTrackedWallet,
   shortAddr,
-  type TrackedWallet,
+  useTrackedWallets,
 } from "@/lib/trackedWallets";
 import type { SerializedWalletPnl, WindowStats } from "@/lib/walletPnl";
 
@@ -133,30 +129,32 @@ function PnlCell({ v, unit, ethUsd }: { v: string; unit: "eth" | "usd"; ethUsd?:
 }
 
 function WrCell({ w }: { w: WindowStats }) {
+  const tr = useT();
   const c = w.pct == null ? DIM : w.pct >= 50 ? OK : BAD;
   return (
-    <span style={{ textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 700, color: c, fontSize: 12 }} title={w.closed ? `盈 ${w.wins} · 亏 ${w.losses}` : undefined}>
+    <span style={{ textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 700, color: c, fontSize: 12 }} title={w.closed ? tr("winLoss", { wins: w.wins, losses: w.losses }) : undefined}>
       {wrText(w)}
     </span>
   );
 }
 
 function TableHead({ sort, dir, onSort, extra }: { sort: SortKey; dir: "asc" | "desc"; onSort: (k: SortKey) => void; extra?: string }) {
+  const tr = useT();
   return (
     <div className="track-row" style={{ display: "grid", gridTemplateColumns: extra ? `${COLS} minmax(120px,0.8fr)` : COLS, gap: 8, padding: "8px 12px", fontSize: 11, color: DIM, borderBottom: "1px solid #161b22", alignItems: "center" }}>
       <span>#</span>
-      <span>地址</span>
-      <HeadBtn label="余额" k="balance" sort={sort} dir={dir} onSort={onSort} />
-      <HeadBtn label="7日PNL" k="pnl7" sort={sort} dir={dir} onSort={onSort} />
-      <HeadBtn label="7日胜率" k="wr7" sort={sort} dir={dir} onSort={onSort} />
-      <HeadBtn label="15日PNL" k="pnl15" sort={sort} dir={dir} onSort={onSort} />
-      <HeadBtn label="15日胜率" k="wr15" sort={sort} dir={dir} onSort={onSort} />
-      <HeadBtn label="30日PNL" k="pnl30" sort={sort} dir={dir} onSort={onSort} />
-      <HeadBtn label="30日胜率" k="wr30" sort={sort} dir={dir} onSort={onSort} />
-      <HeadBtn label="总PNL" k="pnlTotal" sort={sort} dir={dir} onSort={onSort} />
+      <span>{tr("address")}</span>
+      <HeadBtn label={tr("balance")} k="balance" sort={sort} dir={dir} onSort={onSort} />
+      <HeadBtn label={tr("pnl7")} k="pnl7" sort={sort} dir={dir} onSort={onSort} />
+      <HeadBtn label={tr("wr7")} k="wr7" sort={sort} dir={dir} onSort={onSort} />
+      <HeadBtn label={tr("pnl15")} k="pnl15" sort={sort} dir={dir} onSort={onSort} />
+      <HeadBtn label={tr("wr15")} k="wr15" sort={sort} dir={dir} onSort={onSort} />
+      <HeadBtn label={tr("pnl30")} k="pnl30" sort={sort} dir={dir} onSort={onSort} />
+      <HeadBtn label={tr("wr30")} k="wr30" sort={sort} dir={dir} onSort={onSort} />
+      <HeadBtn label={tr("pnlTotal")} k="pnlTotal" sort={sort} dir={dir} onSort={onSort} />
       {extra
-        ? <span style={{ textAlign: "right" }}>操作</span>
-        : <HeadBtn label="成交" k="trades" sort={sort} dir={dir} onSort={onSort} />}
+        ? <span style={{ textAlign: "right" }}>{tr("actions")}</span>
+        : <HeadBtn label={tr("trades")} k="trades" sort={sort} dir={dir} onSort={onSort} />}
       {extra && <span>{extra}</span>}
     </div>
   );
@@ -168,8 +166,10 @@ function AddrCell({
   address: string; note?: string; tracked?: boolean; onTrack?: () => void;
 }) {
   const [copied, setCopied] = useState(false);
+  const tr = useT();
   return (
     <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+      <EmojiAvatar seed={address} size={18} />
       <Link href={`/profile?address=${address}`} style={{ color: "#eaecef", textDecoration: "none", fontFamily: "monospace", fontWeight: 700, fontSize: 12 }} title={address}>
         {shortAddr(address)}
       </Link>
@@ -183,9 +183,9 @@ function AddrCell({
         }}
         style={{ background: "none", border: 0, color: copied ? OK : DIM, cursor: "pointer", fontSize: 10, padding: 0 }}
       >
-        {copied ? "已复制" : "复制"}
+        {copied ? tr("copied") : tr("copy")}
       </button>
-      <a href={addressUrl(CHAIN_ID, address)} target="_blank" rel="noreferrer" style={{ color: DIM, fontSize: 10 }}>浏览器</a>
+      <a href={addressUrl(CHAIN_ID, address)} target="_blank" rel="noreferrer" style={{ color: DIM, fontSize: 10 }}>{tr("explorer")}</a>
       {onTrack && (
         <button
           type="button"
@@ -193,7 +193,7 @@ function AddrCell({
           onClick={onTrack}
           style={{ background: "none", border: 0, cursor: tracked ? "default" : "pointer", color: tracked ? DIM : GOLD, fontWeight: 700, fontSize: 11, padding: 0 }}
         >
-          {tracked ? "已追踪" : "+ 追踪"}
+          {tracked ? tr("alreadyTracking") : tr("plusTrack")}
         </button>
       )}
       {note ? <span style={{ color: GOLD, fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 90 }} title={note}>{note}</span> : null}
@@ -246,29 +246,16 @@ function DataRow({
   );
 }
 
-function useTrackedList() {
-  const [list, setList] = useState<TrackedWallet[]>([]);
-  useEffect(() => {
-    const sync = () => setList(loadTrackedWallets());
-    sync();
-    window.addEventListener(TRACKED_CHANGED_EVENT, sync);
-    window.addEventListener("storage", sync);
-    return () => {
-      window.removeEventListener(TRACKED_CHANGED_EVENT, sync);
-      window.removeEventListener("storage", sync);
-    };
-  }, []);
-  return list;
-}
-
 export default function TrackPage() {
   const [locale] = useLocale();
+  const tr = useT();
   const [unit] = useQuoteUnit();
   const { login, logout, authenticated, user } = usePrivy();
+  const tracked = useTrackedWallets();
   const isMobile = useIsMobile();
   const wallet = user?.wallet?.address?.toLowerCase() ?? "";
   const isAdmin = useAdmins(wallet).isAdmin;
-  const mine = useTrackedList();
+  const mine = tracked.list;
   const trackedSet = useMemo(() => new Set(mine.map((w) => w.address)), [mine]);
 
   const [leaderSort, setLeaderSort] = useState<SortKey>("pnlTotal");
@@ -286,8 +273,11 @@ export default function TrackPage() {
   const [noteInput, setNoteInput] = useState("");
   const [importText, setImportText] = useState(IMPORT_SAMPLE);
   const [msg, setMsg] = useState<string | null>(null);
+  const [sideOpen, setSideOpen] = useState<"add" | "import" | null>(null);
   const [balMap, setBalMap] = useState<Record<string, string | null>>({});
   const fileRef = useRef<HTMLInputElement>(null);
+  const addrRef = useRef<HTMLInputElement>(null);
+  const importRef = useRef<HTMLTextAreaElement>(null);
 
   const { data: tokens } = useQuery({
     queryKey: ["tokens"],
@@ -397,36 +387,58 @@ export default function TrackPage() {
     setBalMap((prev) => ({ ...prev, ...bals }));
   }, [bals]);
 
-  function addOne() {
+  useEffect(() => {
+    if (!sideOpen) return;
+    const t = window.setTimeout(() => {
+      if (sideOpen === "import") importRef.current?.focus();
+      else addrRef.current?.focus();
+    }, 30);
+    const onEsc = (e: KeyboardEvent) => { if (e.key === "Escape") setSideOpen(null); };
+    window.addEventListener("keydown", onEsc);
+    return () => { window.clearTimeout(t); window.removeEventListener("keydown", onEsc); };
+  }, [sideOpen]);
+
+  function needWallet(): boolean {
+    if (tracked.owner) return true;
+    setMsg(t(locale, "connectToSave"));
+    tracked.login();
+    return false;
+  }
+
+  async function addOne() {
+    if (!needWallet()) return;
     const address = addrInput.trim().toLowerCase();
     if (!/^0x[0-9a-f]{40}$/.test(address)) {
-      setMsg("请输入合法的 0x 钱包地址");
+      setMsg(t(locale, "badAddress"));
       return;
     }
-    const r = addTrackedWallets([{ address, note: noteInput }]);
-    if (r.limitHit) setMsg(`已达上限 ${TRACK_LIMIT} 个`);
-    else if (r.added === 0) setMsg("该地址已在追踪列表");
-    else setMsg(`已添加 ${shortAddr(address)}`);
+    const r = await tracked.add([{ address, note: noteInput }]);
+    if (r.error === "connect wallet") setMsg(t(locale, "connectFirst"));
+    else if (r.limitHit) setMsg(t(locale, "hitLimit", { n: TRACK_LIMIT }));
+    else if (r.added === 0) setMsg(t(locale, "alreadyTracked"));
+    else setMsg(t(locale, "addedAddr", { addr: shortAddr(address) }));
     setAddrInput("");
     setNoteInput("");
   }
 
-  function doImport(text: string) {
+  async function doImport(text: string) {
+    if (!needWallet()) return;
     const parsed = parseTrackedImport(text);
     if (parsed.entries.length === 0) {
-      setMsg(parsed.invalid ? `没有可导入的地址（${parsed.invalid} 行无效）` : "没有可导入的地址");
+      setMsg(parsed.invalid ? t(locale, "noImportInvalid", { n: parsed.invalid }) : t(locale, "noImportAddrs"));
       return;
     }
-    const r = addTrackedWallets(parsed.entries);
-    const bits = [`导入 ${r.added} 个`];
-    if (r.skipped) bits.push(`跳过 ${r.skipped} 个`);
-    if (parsed.invalid) bits.push(`无效 ${parsed.invalid} 行`);
-    if (r.limitHit) bits.push(`已达上限 ${TRACK_LIMIT}`);
+    const r = await tracked.add(parsed.entries);
+    const bits = [t(locale, "importedN", { n: r.added })];
+    if (r.skipped) bits.push(t(locale, "skippedN", { n: r.skipped }));
+    if (parsed.invalid) bits.push(t(locale, "invalidN", { n: parsed.invalid }));
+    if (r.limitHit) bits.push(t(locale, "hitLimit", { n: TRACK_LIMIT }));
     setMsg(bits.join(" · "));
   }
 
   function doExport() {
-    const blob = new Blob([formatTrackedExport(loadTrackedWallets())], { type: "text/csv;charset=utf-8" });
+    if (!needWallet()) return;
+    const blob = new Blob([formatTrackedExport(mine)], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = "snowon-track-wallets.csv";
@@ -444,9 +456,9 @@ export default function TrackPage() {
     if (total <= PAGE) return null;
     return (
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", padding: "8px 12px", fontSize: 12, color: DIM }}>
-        <button type="button" disabled={page <= 0} onClick={() => setPage(Math.max(0, page - 1))} style={chip(false)}>上一页</button>
-        <span>{page + 1} / {pages} · 共 {total}</span>
-        <button type="button" disabled={page + 1 >= pages} onClick={() => setPage(Math.min(pages - 1, page + 1))} style={chip(false)}>下一页</button>
+        <button type="button" disabled={page <= 0} onClick={() => setPage(Math.max(0, page - 1))} style={chip(false)}>{tr("prevPage")}</button>
+        <span>{t(locale, "pageOf", { page: page + 1, pages, total })}</span>
+        <button type="button" disabled={page + 1 >= pages} onClick={() => setPage(Math.min(pages - 1, page + 1))} style={chip(false)}>{tr("nextPage")}</button>
       </div>
     );
   }
@@ -461,7 +473,7 @@ export default function TrackPage() {
         </Link>
         <AppNav current="track" />
         {isAdmin && (
-          <Link href="/admin" className="desktop-only" style={{ color: "#848e9c", textDecoration: "none", fontSize: 13 }}>管理</Link>
+          <Link href="/admin" className="desktop-only" style={{ color: "#848e9c", textDecoration: "none", fontSize: 13 }}>{t(locale, "admin")}</Link>
         )}
         <div className="search-wrap" style={{ flex: 1, display: "flex", justifyContent: "center" }}>
           <SearchBox />
@@ -480,20 +492,42 @@ export default function TrackPage() {
       <section style={{ border: "1px solid #1e2329", borderRadius: 10, background: "#0d1117", overflow: "hidden", display: "flex", flexDirection: "column", minHeight: 280 }}>
         <header style={{ padding: "12px 14px", borderBottom: "1px solid #1e2329", display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
           <span style={{ fontWeight: 800, fontSize: 15 }}>👁 {t(locale, "track")}</span>
-          <span style={{ fontSize: 12, color: DIM }}>交易盈利地址 · 已实现PNL（卖出结算）· 点表头排序</span>
+          <span style={{ fontSize: 12, color: DIM }}>{t(locale, "profitAddrs")}</span>
           <div style={{ display: "flex", gap: 4 }}>
-            <button type="button" onClick={() => { setLeaderFilter("profit"); setLeaderPage(0); }} style={chip(leaderFilter === "profit")}>盈利</button>
-            <button type="button" onClick={() => { setLeaderFilter("all"); setLeaderPage(0); }} style={chip(leaderFilter === "all")}>全部</button>
+            <button type="button" onClick={() => { setLeaderFilter("profit"); setLeaderPage(0); }} style={chip(leaderFilter === "profit")}>{tr("profit")}</button>
+            <button type="button" onClick={() => { setLeaderFilter("all"); setLeaderPage(0); }} style={chip(leaderFilter === "all")}>{tr("all")}</button>
           </div>
           <input
             value={leaderQ}
             onChange={(e) => { setLeaderQ(e.target.value); setLeaderPage(0); }}
-            placeholder="筛选地址"
+            placeholder={tr("filterAddr")}
             style={{ ...inputStyle, width: 180 }}
           />
-          <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 8 }}>
+          <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <QuoteUnitToggle size={16} />
-            <span style={{ fontSize: 11, color: DIM }}>{leaders?.total ?? 0} 个地址</span>
+            <span style={{ fontSize: 11, color: DIM }}>{tr("addrCount", { n: leaders?.total ?? 0 })}</span>
+            <button
+              type="button"
+              onClick={() => { if (!needWallet()) return; setSideOpen("add"); }}
+              style={btnStyle}
+              title={tracked.owner ? tr("addToThisWallet") : tr("connectFirst")}
+            >
+              {tr("addWallet")}
+            </button>
+            <button
+              type="button"
+              onClick={() => { if (!needWallet()) return; setSideOpen("import"); }}
+              style={{ background: "none", border: 0, padding: 0, cursor: "pointer", color: GOLD, fontSize: 12 }}
+            >
+              {tr("import")}
+            </button>
+            <button
+              type="button"
+              onClick={doExport}
+              style={{ background: "none", border: 0, padding: 0, cursor: "pointer", color: GOLD, fontSize: 12 }}
+            >
+              {tr("export")}
+            </button>
           </span>
         </header>
         <div className="track-scroll col-scroll">
@@ -503,14 +537,14 @@ export default function TrackPage() {
             onSort={(k) => { toggleSort(leaderSort, leaderDir, setLeaderSort, setLeaderDir, k); setLeaderPage(0); }}
           />
           {leadersLoading && !leaders && (
-            <div style={{ color: DIM, fontSize: 13, textAlign: "center", margin: "36px 0" }}>加载中…</div>
+            <div style={{ color: DIM, fontSize: 13, textAlign: "center", margin: "36px 0" }}>{tr("loading")}</div>
           )}
           {leaderView.length === 0 && !leadersLoading && (
-            <div style={{ color: DIM, fontSize: 13, textAlign: "center", margin: "36px 0" }}>暂无成交地址</div>
+            <div style={{ color: DIM, fontSize: 13, textAlign: "center", margin: "36px 0" }}>{tr("noTraders")}</div>
           )}
           {leaderView.map((row, i) => {
             const rank = leaderPage * PAGE + i + 1;
-            const tracked = trackedSet.has(row.address);
+            const inList = trackedSet.has(row.address);
             return (
               <DataRow
                 key={row.address}
@@ -519,10 +553,12 @@ export default function TrackPage() {
                 unit={unit}
                 ethUsd={ethUsd}
                 bal={balMap[row.address]}
-                tracked={tracked}
+                tracked={inList}
                 onTrack={() => {
-                  const r = addTrackedWallets([{ address: row.address }]);
-                  setMsg(r.limitHit ? `已达上限 ${TRACK_LIMIT}` : tracked ? "已在列表" : "已加入追踪");
+                  if (!needWallet()) return;
+                  void tracked.add([{ address: row.address }]).then((r) => {
+                    setMsg(r.limitHit ? tr("hitLimit", { n: TRACK_LIMIT }) : r.added === 0 ? tr("inList") : tr("joinedTrack"));
+                  });
                 }}
               />
             );
@@ -534,97 +570,28 @@ export default function TrackPage() {
       {/* 我的追踪 */}
       <section style={{ border: "1px solid #1e2329", borderRadius: 10, background: "#0d1117", overflow: "hidden", display: "flex", flexDirection: "column", minHeight: 320 }}>
         <header style={{ padding: "12px 14px", borderBottom: "1px solid #1e2329", display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-          <span style={{ fontWeight: 800, fontSize: 15 }}>我的追踪</span>
-          <span style={{ fontSize: 12, color: DIM }}>{mine.length} / {TRACK_LIMIT}</span>
+          <span style={{ fontWeight: 800, fontSize: 15 }}>{tr("myTrack")}</span>
+          <span style={{ fontSize: 12, color: DIM }}>
+            {tracked.owner ? `${mine.length} / ${TRACK_LIMIT}` : tr("connectToSync")}
+          </span>
           <input
             value={mineQ}
             onChange={(e) => { setMineQ(e.target.value); setMinePage(0); }}
-            placeholder="筛选地址 / 备注"
+            placeholder={tr("filterAddrNote")}
             style={{ ...inputStyle, width: 180 }}
           />
         </header>
-
-        <div style={{ padding: "10px 14px", borderBottom: "1px solid #1e2329", display: "flex", flexDirection: "column", gap: 8 }}>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            <input
-              value={addrInput}
-              onChange={(e) => setAddrInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && addOne()}
-              placeholder="钱包地址 0x…"
-              style={{ ...inputStyle, flex: 1, minWidth: 220, fontFamily: "monospace" }}
-            />
-            <input
-              value={noteInput}
-              onChange={(e) => setNoteInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && addOne()}
-              placeholder="备注（可选）"
-              style={{ ...inputStyle, width: 180 }}
-            />
-            <button type="button" onClick={addOne} style={btnStyle}>添加钱包</button>
-          </div>
-          <textarea
-            value={importText}
-            onChange={(e) => setImportText(e.target.value)}
-            spellCheck={false}
-            style={{
-              ...inputStyle, width: "100%", minHeight: 110, resize: "vertical",
-              fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
-              lineHeight: 1.45, boxSizing: "border-box",
-            }}
-          />
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-            <button type="button" onClick={() => doImport(importText)} style={btnStyle}>导入</button>
-            <button
-              type="button"
-              onClick={() => fileRef.current?.click()}
-              style={{ ...btnStyle, background: "#1e2329", color: "#eaecef" }}
-            >
-              从文件导入
-            </button>
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".csv,.txt,.tsv"
-              hidden
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                e.target.value = "";
-                if (!f) return;
-                void f.text().then((t) => {
-                  setImportText(t);
-                  doImport(t);
-                });
-              }}
-            />
-            <button
-              type="button"
-              onClick={doExport}
-              disabled={mine.length === 0}
-              style={{ ...btnStyle, background: "#1e2329", color: mine.length ? "#eaecef" : DIM }}
-            >
-              导出 CSV
-            </button>
-            <button
-              type="button"
-              onClick={() => setImportText(IMPORT_SAMPLE)}
-              style={{ background: "none", border: 0, color: DIM, cursor: "pointer", fontSize: 12 }}
-            >
-              恢复样本
-            </button>
-            {msg && <span style={{ fontSize: 12, color: GOLD }}>{msg}</span>}
-          </div>
-        </div>
 
         <div className="track-scroll col-scroll">
           <TableHead
             sort={mineSort}
             dir={mineDir}
             onSort={(k) => { toggleSort(mineSort, mineDir, setMineSort, setMineDir, k); setMinePage(0); }}
-            extra="备注"
+            extra={t(locale, "note")}
           />
           {mineView.length === 0 && (
             <div style={{ color: DIM, fontSize: 13, textAlign: "center", margin: "36px 0" }}>
-              还没有追踪任何地址，填写地址添加或按上方格式批量导入
+              {tracked.owner ? tr("noTrackYet") : tr("noTrackConnect")}
             </div>
           )}
           {mineView.map((item, i) => (
@@ -638,17 +605,20 @@ export default function TrackPage() {
               actions={
                 <button
                   type="button"
-                  onClick={() => removeTrackedWallet(item.wallet.address)}
+                  onClick={() => void tracked.remove(item.wallet.address)}
                   style={{ background: "none", border: 0, color: BAD, cursor: "pointer", fontSize: 11 }}
                 >
-                  移除
+                  {tr("remove")}
                 </button>
               }
               extra={
                 <input
-                  value={item.wallet.note ?? ""}
-                  onChange={(e) => patchTrackedWallet(item.wallet.address, { note: e.target.value })}
-                  placeholder="备注"
+                  key={`${item.wallet.address}:${item.wallet.note ?? ""}`}
+                  defaultValue={item.wallet.note ?? ""}
+                  onBlur={(e) => {
+                    if (e.target.value !== (item.wallet.note ?? "")) void tracked.patch(item.wallet.address, { note: e.target.value });
+                  }}
+                  placeholder={tr("note")}
                   style={{ ...inputStyle, width: "100%", padding: "5px 8px", fontSize: 11 }}
                 />
               }
@@ -657,6 +627,100 @@ export default function TrackPage() {
         </div>
         <Pager page={minePage} setPage={setMinePage} total={mineViewAll.length} />
       </section>
+
+      {sideOpen && (
+        <>
+          <div
+            onClick={() => setSideOpen(null)}
+            style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 60 }}
+          />
+          <aside
+            style={{
+              position: "fixed", top: 0, right: 0, bottom: 44, zIndex: 61, width: isMobile ? "100%" : 380,
+              background: "#0d1117", borderLeft: "1px solid #2b3139",
+              display: "flex", flexDirection: "column", boxShadow: "-12px 0 40px rgba(0,0,0,0.45)",
+            }}
+          >
+            <header style={{ display: "flex", alignItems: "center", gap: 8, padding: "14px 16px", borderBottom: "1px solid #1e2329", flexShrink: 0 }}>
+              <span style={{ fontWeight: 800, fontSize: 15 }}>{sideOpen === "import" ? tr("batchImport") : tr("addWallet")}</span>
+              <span style={{ fontSize: 11, color: DIM }}>{mine.length} / {TRACK_LIMIT}</span>
+              <button
+                type="button"
+                onClick={() => setSideOpen(null)}
+                style={{ marginLeft: "auto", background: "none", border: 0, color: "#848e9c", cursor: "pointer", fontSize: 18, lineHeight: 1 }}
+              >
+                ×
+              </button>
+            </header>
+            <div className="col-scroll" style={{ flex: 1, overflowY: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ fontSize: 12, color: DIM, fontWeight: 700 }}>{tr("singleAdd")}</div>
+              <input
+                ref={addrRef}
+                value={addrInput}
+                onChange={(e) => setAddrInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && addOne()}
+                placeholder={tr("walletAddrPh")}
+                style={{ ...inputStyle, width: "100%", boxSizing: "border-box", fontFamily: "monospace" }}
+              />
+              <input
+                value={noteInput}
+                onChange={(e) => setNoteInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && addOne()}
+                placeholder={tr("noteOptional")}
+                style={{ ...inputStyle, width: "100%", boxSizing: "border-box" }}
+              />
+              <button type="button" onClick={addOne} style={btnStyle}>{tr("addWallet")}</button>
+
+              <div style={{ height: 1, background: "#1e2329", margin: "6px 0" }} />
+              <div style={{ fontSize: 12, color: DIM, fontWeight: 700 }}>{tr("batchImport")}</div>
+              <textarea
+                ref={importRef}
+                value={importText}
+                onChange={(e) => setImportText(e.target.value)}
+                spellCheck={false}
+                style={{
+                  ...inputStyle, width: "100%", minHeight: 220, resize: "vertical", boxSizing: "border-box",
+                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+                  lineHeight: 1.45,
+                }}
+              />
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                <button type="button" onClick={() => doImport(importText)} style={btnStyle}>{tr("import")}</button>
+                <button
+                  type="button"
+                  onClick={() => fileRef.current?.click()}
+                  style={{ ...btnStyle, background: "#1e2329", color: "#eaecef" }}
+                >
+                  {tr("importFile")}
+                </button>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept=".csv,.txt,.tsv"
+                  hidden
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    e.target.value = "";
+                    if (!f) return;
+                    void f.text().then((text) => {
+                      setImportText(text);
+                      doImport(text);
+                    });
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setImportText(IMPORT_SAMPLE)}
+                  style={{ background: "none", border: 0, color: DIM, cursor: "pointer", fontSize: 12 }}
+                >
+                  {tr("restoreSample")}
+                </button>
+              </div>
+              {msg && <span style={{ fontSize: 12, color: GOLD }}>{msg}</span>}
+            </div>
+          </aside>
+        </>
+      )}
     </main>
   );
 }

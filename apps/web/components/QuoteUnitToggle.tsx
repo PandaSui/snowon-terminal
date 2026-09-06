@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuoteUnit, type QuoteUnit } from "@/lib/quoteUnit";
+import { useT } from "@/lib/locale";
 
 function EthIcon({ size, active }: { size: number; active: boolean }) {
   const c = active ? "#627EEA" : "#5e6673";
@@ -40,6 +41,7 @@ function UsdIcon({ size, active }: { size: number; active: boolean }) {
 
 /** ETH 钻石 / 美元 $ logo 切换计价 */
 export function QuoteUnitToggle({ size = 16 }: { size?: number }) {
+  const tr = useT();
   const [unit, setUnit] = useQuoteUnit();
   const btn = (u: QuoteUnit): React.CSSProperties => ({
     width: size + 10,
@@ -54,11 +56,11 @@ export function QuoteUnitToggle({ size = 16 }: { size?: number }) {
     background: unit === u ? "#1c1f26" : "transparent",
   });
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 1 }} title="切换 ETH / 美元计价">
-      <button type="button" onClick={() => setUnit("eth")} style={btn("eth")} title="ETH 计价">
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 1 }} title={tr("toggleQuote")}>
+      <button type="button" onClick={() => setUnit("eth")} style={btn("eth")} title={tr("ethQuote")}>
         <EthIcon size={size} active={unit === "eth"} />
       </button>
-      <button type="button" onClick={() => setUnit("usd")} style={btn("usd")} title="美元计价">
+      <button type="button" onClick={() => setUnit("usd")} style={btn("usd")} title={tr("usdQuote")}>
         <UsdIcon size={size} active={unit === "usd"} />
       </button>
     </span>
