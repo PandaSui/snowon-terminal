@@ -309,8 +309,8 @@ function TokenCardInner({ t, showMultiplier }: { t: HomeToken; showMultiplier?: 
             <TokenLogo src={t.logoUri} alt={t.symbol} size={28} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <span style={{ fontWeight: 700, fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {nameT || t.name}
+                <span style={{ fontWeight: 800, fontSize: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  ${t.symbol}
                 </span>
                 {hot && (
                   <span
@@ -327,8 +327,8 @@ function TokenCardInner({ t, showMultiplier }: { t: HomeToken; showMultiplier?: 
                 )}
                 {t.antiBundle && <span title="antiBundle" style={{ fontSize: 10 }}>🛡</span>}
               </div>
-              <div style={{ fontSize: 11, color: "#848e9c" }}>
-                ${t.symbol} · {formatTimeAgo(t.createdAt, locale)}
+              <div style={{ fontSize: 11, color: "#848e9c", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {nameT || t.name} · {formatTimeAgo(t.createdAt, locale)}
               </div>
             </div>
             <div style={{ textAlign: "right", paddingRight: 14 }}>
