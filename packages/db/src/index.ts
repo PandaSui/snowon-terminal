@@ -8,6 +8,7 @@ import * as schema from "./schema.js";
 
 export * from "./schema.js";
 export * from "./settings.js";
+export * from "./session.js";
 
 export type Db = PostgresJsDatabase<typeof schema> | PgliteDatabase<typeof schema>;
 

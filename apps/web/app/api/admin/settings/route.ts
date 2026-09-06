@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getAppSettings, updateAppSettings, SNOW_TOKEN, type AppSettings } from "@terminal/db";
-import { isAdminWallet } from "@/lib/admins";
+import { requireAdmin } from "@/lib/auth";
 import { db } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -13,10 +13,7 @@ export async function GET() {
 }
 
 export async function PUT(req: NextRequest) {
-  const wallet = (req.headers.get("x-admin-wallet") ?? "").toLowerCase();
-  if (!/^0x[0-9a-f]{40}$/.test(wallet) || !(await isAdminWallet(wallet))) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
+  if (!(await requireAdmin(req))) return NextResponse.json({ error: "未授权" }, { status: 401 });
   const body = (await req.json().catch(() => ({}))) as Partial<AppSettings>;
   const patch: Partial<AppSettings> = {};
 

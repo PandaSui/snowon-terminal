@@ -5,7 +5,8 @@ import { snowAbis } from "@terminal/adapters";
 import { chainConfigs } from "@terminal/db";
 import { db } from "@/lib/db";
 import { apiError } from "@/lib/api";
-import { envAdminWallets, isAdminWallet } from "@/lib/admins";
+import { envAdminWallets } from "@/lib/admins";
+import { requireAdmin } from "@/lib/auth";
 import { invalidateChainConfigCache, listChainConfigs, type ChainConfigRow } from "@/lib/chainConfigs";
 
 /**
@@ -24,10 +25,9 @@ function jsonSafe<T>(v: T): T {
 }
 
 async function checkAdmin(req: NextRequest): Promise<NextResponse | null> {
-  const wallet = (req.headers.get("x-admin-wallet") ?? "").toLowerCase();
-  // 合并名单:env 主管理员 ∪ DB 协管员(见 /api/admin/admins)
-  if (!/^0x[0-9a-f]{40}$/.test(wallet) || !(await isAdminWallet(wallet))) {
-    return NextResponse.json({ error: "非管理员钱包,无权修改链配置" }, { status: 403 });
+  // 会话令牌(签名登录)+ 管理员名单校验,取代可伪造的 x-admin-wallet 头
+  if (!(await requireAdmin(req))) {
+    return NextResponse.json({ error: "未登录或非管理员,无权修改链配置" }, { status: 403 });
   }
   return null;
 }

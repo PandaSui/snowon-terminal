@@ -13,14 +13,19 @@ interface Props {
   onSend: (content: string) => void;
   onPin: (content: string) => void;
   pinning: boolean;
+  signedIn: boolean;
+  signIn: () => void;
+  signing: boolean;
 }
 
 /**
  * 主页公共聊天室栏:
  * 消息列表 → 付费叮住行(20U/2分钟,炫彩闪烁字体上顶部轮换)→ 输入 + 发送。
  */
-export function HomeChat({ messages, pins, connected, lastError, onSend, onPin, pinning }: Props) {
+export function HomeChat({ messages, pins, connected, lastError, onSend, onPin, pinning, signedIn, signIn, signing }: Props) {
   const { authenticated, login } = usePrivy();
+  // 三段式:未连接钱包→登录;已连接未签名→签名登录;已签名→执行
+  const act = (fn: () => void) => (!authenticated ? login() : !signedIn ? signIn() : fn());
   const [input, setInput] = useState("");
   const [pinInput, setPinInput] = useState("");
   const [cfg, setCfg] = useState({ price: "100", durMin: 60, max: 5 });
@@ -88,10 +93,10 @@ export function HomeChat({ messages, pins, connected, lastError, onSend, onPin, 
         <input
           value={pinInput}
           onChange={(e) => setPinInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && !pinning && (authenticated ? pin() : login())}
+          onKeyDown={(e) => e.key === "Enter" && !pinning && act(pin)}
           maxLength={140}
           disabled={pinning}
-          placeholder={authenticated ? `叮住你的消息… (${pins.length}/${cfg.max})` : "登录后可付费叮住"}
+          placeholder={!authenticated ? "登录后可付费叮住" : !signedIn ? "签名登录后可叮住" : `叮住你的消息… (${pins.length}/${cfg.max})`}
           style={{
             flex: 1, minWidth: 0, padding: "7px 10px", fontSize: 12,
             background: "#0b0e11", border: "1px solid #2b3139", borderRadius: 6,
@@ -99,7 +104,7 @@ export function HomeChat({ messages, pins, connected, lastError, onSend, onPin, 
           }}
         />
         <button
-          onClick={authenticated ? pin : login}
+          onClick={() => act(pin)}
           disabled={pinning}
           title={`付费 ${cfg.price} SNOW,消息在顶部栏轮换展示 ${cfg.durMin} 分钟(最多 ${cfg.max} 条)`}
           style={{
@@ -119,15 +124,15 @@ export function HomeChat({ messages, pins, connected, lastError, onSend, onPin, 
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && (authenticated ? send() : login())}
-          placeholder={authenticated ? "说点什么… 😊" : "登录后参与聊天"}
+          onKeyDown={(e) => e.key === "Enter" && act(send)}
+          placeholder={!authenticated ? "登录后参与聊天" : !signedIn ? "签名登录后可发言" : "说点什么… 😊"}
           style={{
             flex: 1, minWidth: 0, padding: "10px 12px", fontSize: 12,
             background: "transparent", border: 0, color: "#fff", outline: "none",
           }}
         />
         <button
-          onClick={authenticated ? send : login}
+          onClick={() => act(send)}
           style={{
             flexShrink: 0, padding: "0 18px", border: 0, cursor: "pointer",
             background: "#f0b90b", fontWeight: 700, fontSize: 12,

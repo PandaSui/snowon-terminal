@@ -2,19 +2,12 @@ import "dotenv/config";
 import { WebSocketServer, WebSocket } from "ws";
 import Redis from "ioredis";
 import { and, desc, eq, isNull } from "drizzle-orm";
-import { PrivyClient } from "@privy-io/server-auth";
 import { createDb } from "@terminal/db";
-import { chatMessages, chatUsers, getAppSettings, type AppSettings } from "@terminal/db";
+import { chatMessages, chatUsers, getAppSettings, verifySession, type AppSettings } from "@terminal/db";
 import { verifySnowPayment, snowToWei } from "./pay.js";
 import { holdingShareBps } from "./holdings.js";
 
-// Privy JWT 服务端校验:配了 PRIVY_APP_ID + PRIVY_APP_SECRET 才启用;
-// 未配置=本地开发模式,信任客户端传来的 userId(骨架行为,上线前必须配置)
-const privy =
-  process.env.PRIVY_APP_ID && process.env.PRIVY_APP_SECRET
-    ? new PrivyClient(process.env.PRIVY_APP_ID, process.env.PRIVY_APP_SECRET)
-    : null;
-if (!privy) console.warn("[chat] PRIVY_APP_SECRET 未配置:auth 为开发模式,信任客户端 userId");
+// 鉴权:客户端签名登录换取会话令牌,连接时带来,服务端 verifySession 得到可信钱包地址。
 
 /**
  * 聊天服务:WebSocket + Postgres 持久化 + Redis 扇出(多实例水平扩展)。
@@ -201,18 +194,8 @@ async function handleMessage(ctx: ClientCtx, raw: string) {
   }
 
   if (msg.t === "auth") {
-    if (privy) {
-      // 生产模式:必须带 Privy access token,服务端验签后取 userId
-      if (!msg.token) return ctx.ws.send(JSON.stringify({ t: "error", message: "auth token required" }));
-      try {
-        const claims = await privy.verifyAuthToken(msg.token);
-        ctx.userId = claims.userId;
-      } catch {
-        return ctx.ws.send(JSON.stringify({ t: "error", message: "auth failed" }));
-      }
-    } else {
-      ctx.userId = msg.userId;
-    }
+    // 会话令牌(签名登录)→ ctx.userId = 验签得到的钱包地址;无效则保持匿名(仅可读)
+    ctx.userId = verifySession(msg.token) ?? undefined;
     if (ctx.userId) await ensureUser(ctx.userId);
     return;
   }

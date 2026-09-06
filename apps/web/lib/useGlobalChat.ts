@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { usePrivy, useWallets } from "@privy-io/react-auth";
+import { useWallets } from "@privy-io/react-auth";
 import { apiUrl } from "@/lib/apiBase";
+import { useSession } from "@/lib/useSession";
 
 export interface ChatMsg {
   id: string;
@@ -26,7 +27,7 @@ export interface Pin {
  * WebSocket 连接 + 消息历史/广播 + 叮住消息全量同步。
  */
 export function useGlobalChat(chainId: number) {
-  const { authenticated, user, getAccessToken } = usePrivy();
+  const session = useSession();
   const { wallets } = useWallets();
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [pins, setPins] = useState<Pin[]>([]);
@@ -41,15 +42,8 @@ export function useGlobalChat(chainId: number) {
     wsRef.current = ws;
     ws.onopen = () => {
       setConnected(true);
-      void (async () => {
-        const token = authenticated ? await getAccessToken().catch(() => null) : null;
-        ws.send(JSON.stringify({
-          t: "auth",
-          token,
-          userId: user?.id ?? `anon:${Math.random().toString(36).slice(2)}`,
-        }));
-        ws.send(JSON.stringify({ t: "join", room }));
-      })();
+      ws.send(JSON.stringify({ t: "auth", token: session.token }));
+      ws.send(JSON.stringify({ t: "join", room }));
     };
     ws.onclose = () => setConnected(false);
     ws.onmessage = (e) => {
@@ -74,7 +68,7 @@ export function useGlobalChat(chainId: number) {
       }
     };
     return () => ws.close();
-  }, [room, authenticated, user?.id, getAccessToken]);
+  }, [room, session.token]);
 
   const send = useCallback((content: string) => {
     if (!content.trim() || wsRef.current?.readyState !== WebSocket.OPEN) return;
@@ -121,5 +115,8 @@ export function useGlobalChat(chainId: number) {
     [room, chainId, wallets, pinning, showErr],
   );
 
-  return { messages, pins, send, pin, connected, pinning, lastError };
+  return {
+    messages, pins, send, pin, connected, pinning, lastError,
+    signedIn: session.signedIn, signIn: session.signIn, signing: session.signing,
+  };
 }

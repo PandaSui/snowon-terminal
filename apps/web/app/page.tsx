@@ -114,6 +114,9 @@ export default function DiscoverPage() {
         onSend={chat.send}
         onPin={chat.pin}
         pinning={chat.pinning}
+        signedIn={chat.signedIn}
+        signIn={chat.signIn}
+        signing={chat.signing}
       />
     </section>
   );

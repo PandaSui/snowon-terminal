@@ -306,3 +306,10 @@ export const appSettings = pgTable("app_settings", {
   pinPayee: varchar("pin_payee", { length: 42 }).notNull().default("0xEC11B5bd5f863b588a66A97C1Eda6c47010Ca751"),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// ────────────────────── 登录 nonce(签名鉴权防重放)──────────────────────
+/** 一次性 nonce:签发后写入,登录验签时消费(删除),5 分钟过期。 */
+export const authNonces = pgTable("auth_nonces", {
+  nonce: varchar("nonce", { length: 64 }).primaryKey(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+});
