@@ -8,6 +8,7 @@ import { loadChainConfigsFromEnv, type ChainConfig } from "@terminal/adapters";
 import { clientFor } from "./config.js";
 import { EventHandlers } from "./handlers.js";
 import { rescoreRecentTokens } from "./bundle.js";
+import { backfillMissingFunders } from "./funding.js";
 import { loadCursor, saveCursor } from "./cursor.js";
 import { enrichMissingTokenMeta } from "./meta.js";
 
@@ -258,6 +259,8 @@ async function runChain(cfg: ChainConfig, db: ReturnType<typeof createDb>, redis
   console.log(`[chain ${cfg.chainId}] live watchers started from ${liveFrom}`);
 
   setInterval(() => rescoreRecentTokens(db, cfg.chainId).catch(onErr), 10 * 60 * 1000);
+  setInterval(() => backfillMissingFunders(db, client, cfg.chainId).catch(onErr), 20_000);
+  void backfillMissingFunders(db, client, cfg.chainId).catch(onErr);
   void enrichMissingTokenMeta(db, cfg.chainId).catch(onErr);
 
   void (async () => {

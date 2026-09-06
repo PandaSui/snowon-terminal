@@ -259,7 +259,7 @@ export function TradeHistoryPanel({
       const res = await fetch(apiUrl(`/api/token/${address}/trades?window=${windowKey}&order=${order}&limit=200`));
       return readJson<{ trades: TokenTrade[] }>(res);
     },
-    refetchInterval: 5_000,
+    refetchInterval: 8_000,
   });
 
   const trades = data?.trades ?? [];

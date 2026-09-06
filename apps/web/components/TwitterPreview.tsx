@@ -74,12 +74,13 @@ export function TwitterPreview({ href, compact = true }: { href: string; compact
   const [open, setOpen] = useState(false);
   const { data } = useQuery({
     queryKey: ["twitter-preview", href],
-    enabled: !!href,
+    enabled: open && !!href,
     staleTime: 10 * 60_000,
+    retry: false,
     queryFn: async () => {
       const res = await fetch(apiUrl(`/api/twitter-preview?url=${encodeURIComponent(href)}`));
       const body = await readJson<Preview & { error?: string }>(res);
-      if (!res.ok || body.error) throw new Error(body.error ?? "preview failed");
+      if (!res.ok || body.error) return null;
       return body;
     },
   });

@@ -29,7 +29,9 @@ export function ChatBox({ chainId, tokenAddress }: { chainId: number; tokenAddre
   const room = `${chainId}:${tokenAddress.toLowerCase()}`;
 
   useEffect(() => {
-    const ws = new WebSocket(process.env.NEXT_PUBLIC_WS_URL!);
+    const url = process.env.NEXT_PUBLIC_WS_URL;
+    if (!url) return;
+    const ws = new WebSocket(url);
     wsRef.current = ws;
     ws.onopen = () => {
       // 服务端启用 PRIVY_APP_SECRET 时校验 token;开发模式回退到 userId

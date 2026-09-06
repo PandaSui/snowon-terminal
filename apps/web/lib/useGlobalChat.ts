@@ -38,7 +38,9 @@ export function useGlobalChat(chainId: number) {
   const room = `${chainId}:global`;
 
   useEffect(() => {
-    const ws = new WebSocket(process.env.NEXT_PUBLIC_WS_URL!);
+    const url = process.env.NEXT_PUBLIC_WS_URL;
+    if (!url) return;
+    const ws = new WebSocket(url);
     wsRef.current = ws;
     ws.onopen = () => {
       setConnected(true);

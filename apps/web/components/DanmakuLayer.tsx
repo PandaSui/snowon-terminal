@@ -60,7 +60,9 @@ export function DanmakuLayer({ chainId, tokenAddress }: { chainId: number; token
 
     const connect = () => {
       if (dead) return;
-      ws = new WebSocket(process.env.NEXT_PUBLIC_WS_URL!);
+      const url = process.env.NEXT_PUBLIC_WS_URL;
+      if (!url) return;
+      ws = new WebSocket(url);
       ws.onopen = () => {
         retry = 0;
         ws!.send(JSON.stringify({ t: "join", room }));

@@ -56,6 +56,49 @@ interface UdfHistory {
   errmsg?: string;
 }
 
+function finiteNum(n: unknown): n is number {
+  return typeof n === "number" && Number.isFinite(n);
+}
+
+/**
+ * 丢掉 NaN / 非单调时间,并把相对中位价过分离谱的影线夹住。
+ * 脏成交(代币↔代币 hop 把另一腿数量当成 ETH)会把 high 拉到 6 ETH,
+ * 真实价格在 1e-8,整图被压成一条线。
+ */
+function sanitizeBars(bars: Bar[]): Bar[] {
+  const closes = bars.map((b) => b.close).filter((n) => finiteNum(n) && n > 0);
+  if (!closes.length) return [];
+  const sorted = [...closes].sort((a, b) => a - b);
+  const med = sorted[Math.floor(sorted.length / 2)]!;
+  const hi = med * 10_000;
+  const lo = med / 10_000;
+  const out: Bar[] = [];
+  let lastT = Number.NEGATIVE_INFINITY;
+  for (const b of bars) {
+    if (!finiteNum(b.time) || !finiteNum(b.open) || !finiteNum(b.close) || !finiteNum(b.high) || !finiteNum(b.low)) continue;
+    if (b.time <= lastT) continue;
+    if (b.close <= 0 || b.close > hi || b.close < lo) continue;
+    if (b.open <= 0 || b.open > hi || b.open < lo) continue;
+    const bodyHi = Math.max(b.open, b.close);
+    const bodyLo = Math.min(b.open, b.close);
+    let high = Math.max(b.high, bodyHi);
+    let low = Math.min(b.low, bodyLo);
+    if (bodyHi > 0 && high > bodyHi * 8) high = bodyHi * 8;
+    if (bodyLo > 0 && low < bodyLo / 8) low = bodyLo / 8;
+    if (high > hi) high = Math.max(bodyHi, med * 50);
+    if (low < lo && lo > 0) low = Math.min(bodyLo, med / 50);
+    out.push({
+      time: b.time,
+      open: b.open,
+      high: Math.max(high, low),
+      low: Math.min(high, low),
+      close: b.close,
+    });
+    lastT = b.time;
+  }
+  return out;
+}
+
 export function TradingChart({
   chainId,
   tokenAddress,
@@ -73,6 +116,7 @@ export function TradingChart({
   const volRef = useRef<ReturnType<IChartApi["addSeries"]> | null>(null);
   const [internalRes, setInternalRes] = useState<ChartResolution>("5");
   const [empty, setEmpty] = useState(false);
+  const [chartReady, setChartReady] = useState(false);
   const tr = useT();
   const resolution = (resProp ?? internalRes) as ChartResolution;
 
@@ -103,8 +147,11 @@ export function TradingChart({
   }
 
   useEffect(() => {
-    if (!containerRef.current) return;
-    const chart = createChart(containerRef.current, {
+    const el = containerRef.current;
+    if (!el) return;
+    const chart = createChart(el, {
+      width: Math.max(1, el.clientWidth || 600),
+      height: Math.max(1, el.clientHeight || 360),
       autoSize: true,
       layout: {
         background: { color: "#0b0e11" },
@@ -139,7 +186,20 @@ export function TradingChart({
     chartRef.current = chart;
     seriesRef.current = candles;
     volRef.current = volume;
+    setChartReady(true);
+    const ro = new ResizeObserver(() => {
+      const node = containerRef.current;
+      const api = chartRef.current;
+      if (!node || !api) return;
+      const nw = Math.floor(node.clientWidth);
+      const nh = Math.floor(node.clientHeight);
+      if (nw < 2 || nh < 2) return;
+      api.applyOptions({ width: nw, height: nh });
+    });
+    ro.observe(el);
     return () => {
+      ro.disconnect();
+      setChartReady(false);
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
@@ -223,9 +283,9 @@ export function TradingChart({
   }, [showVol]);
 
   useEffect(() => {
-    if (!rateReady) return;
+    if (!rateReady || !chartReady) return;
     let cancelled = false;
-    const symbol = `${chainId}:${tokenAddress}`;
+    const symbol = `${chainId}:${String(tokenAddress).toLowerCase()}`;
     const res = RES_SECONDS[resolution] ?? 300;
     lastBarRef.current = null;
     fittedRef.current = false;
@@ -247,34 +307,49 @@ export function TradingChart({
           refreshMas();
           return;
         }
-        setEmpty(false);
         const m = multRef.current;
-        const bars: Bar[] = d.t.map((t, i) => ({
+        const raw: Bar[] = d.t.map((t, i) => ({
           time: (t + TZ_OFFSET) as UTCTimestamp,
-          open: d.o![i] * m,
-          high: d.h![i] * m,
-          low: d.l![i] * m,
-          close: d.c![i] * m,
+          open: Number(d.o![i]) * m,
+          high: Number(d.h![i]) * m,
+          low: Number(d.l![i]) * m,
+          close: Number(d.c![i]) * m,
         }));
+        const bars = sanitizeBars(raw);
+        if (!bars.length) {
+          setEmpty(true);
+          seriesRef.current.setData([]);
+          volRef.current?.setData([]);
+          barsRef.current = [];
+          lastBarRef.current = null;
+          refreshMas();
+          return;
+        }
+        setEmpty(false);
         barsRef.current = bars;
-        seriesRef.current.setData(bars);
-        volRef.current?.setData(
-          d.t.map((t, i) => ({
-            time: (t + TZ_OFFSET) as UTCTimestamp,
-            value: d.v![i] * m,
-            color: d.c![i] >= d.o![i] ? "rgba(14,203,129,0.4)" : "rgba(246,70,93,0.4)",
-          })),
-        );
+        const keep = new Set(bars.map((b) => b.time));
+        try {
+          seriesRef.current.setData(bars);
+          volRef.current?.setData(
+            d.t.flatMap((t, i) => {
+              const time = (t + TZ_OFFSET) as UTCTimestamp;
+              if (!keep.has(time)) return [];
+              const value = Number(d.v?.[i]) * m;
+              if (!Number.isFinite(value) || value < 0) return [];
+              return [{
+                time,
+                value,
+                color: Number(d.c![i]) >= Number(d.o![i]) ? "rgba(14,203,129,0.4)" : "rgba(246,70,93,0.4)",
+              }];
+            }),
+          );
+        } catch {
+          if (!cancelled) setEmpty(true);
+          return;
+        }
         volRef.current?.applyOptions({ visible: showVol });
         refreshMas();
-        const n = d.t.length - 1;
-        lastBarRef.current = {
-          time: (d.t[n] + TZ_OFFSET) as UTCTimestamp,
-          open: d.o![n] * m,
-          high: d.h![n] * m,
-          low: d.l![n] * m,
-          close: d.c![n] * m,
-        };
+        lastBarRef.current = bars[bars.length - 1] ?? null;
         if (!fittedRef.current) {
           fittedRef.current = true;
           requestAnimationFrame(() => chartRef.current?.timeScale().fitContent());
@@ -284,13 +359,16 @@ export function TradingChart({
       }
     }
 
-    const off = subscribe(`price:${symbol.toLowerCase()}`, (tick) => {
+    const off = subscribe(`price:${symbol}`, (tick) => {
       if (!seriesRef.current) return;
       const price = Number(tick.priceEth) * multRef.current;
       const ts = Math.floor(new Date(String(tick.ts)).getTime() / 1000);
-      if (!Number.isFinite(price) || !Number.isFinite(ts)) return;
-      const bucket = (Math.floor(ts / res) * res + TZ_OFFSET) as UTCTimestamp;
+      if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(ts)) return;
       const last = lastBarRef.current;
+      // 脏 tick(另一腿代币数量当 ETH)直接丢弃,避免实时把坐标轴撑爆
+      if (last && last.close > 0 && (price > last.close * 10_000 || price < last.close / 10_000)) return;
+      const bucket = (Math.floor(ts / res) * res + TZ_OFFSET) as UTCTimestamp;
+      if (last && bucket < last.time) return;
       // 新 bar 开盘价衔接上一根收盘价,与历史接口的补线逻辑一致,避免实时跳动出跳空
       const bar: Bar =
         last && last.time === bucket
@@ -301,8 +379,12 @@ export function TradingChart({
       lastBarRef.current = bar;
       const bars = barsRef.current;
       if (bars.length && bars[bars.length - 1].time === bar.time) bars[bars.length - 1] = bar;
-      else bars.push(bar);
-      seriesRef.current.update(bar);
+      else if (!bars.length || bar.time > bars[bars.length - 1].time) bars.push(bar);
+      try {
+        seriesRef.current.update(bar);
+      } catch {
+        try { seriesRef.current.setData(bars); } catch { /* ignore */ }
+      }
       refreshMas();
       setEmpty(false);
     });
@@ -316,7 +398,7 @@ export function TradingChart({
       off();
     };
     // rateReady 仅表达"汇率是否就位",数值本身的变化(15s 刷新)不触发重载
-  }, [chainId, tokenAddress, resolution, unit, rateReady]);
+  }, [chainId, tokenAddress, resolution, unit, rateReady, chartReady]);
 
   // USD 模式下价格数量级变大,降低精度避免一堆尾零
   useEffect(() => {
@@ -396,10 +478,10 @@ export function TradingChart({
           {tr("scrollZoom")}
         </span>
       </div>
-      <div style={{ position: "relative", width: "100%", flex: 1, minHeight: 0 }}>
+      <div style={{ position: "relative", width: "100%", flex: 1, minHeight: 220 }}>
         <div
           ref={containerRef}
-          style={{ width: "100%", height: "100%" }}
+          style={{ width: "100%", height: "100%", minHeight: 220 }}
           onContextMenu={(e) => {
             e.preventDefault();
             const r = e.currentTarget.getBoundingClientRect();

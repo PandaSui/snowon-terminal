@@ -292,6 +292,8 @@ function useTrackedBuyFeed() {
   const seen = useRef(new Set<string>());
   const primed = useRef(false);
   const watchKey = tracked.list.filter((w) => w.watching !== false).map((w) => w.address).join(",");
+  const listRef = useRef(tracked.list);
+  listRef.current = tracked.list;
 
   useEffect(() => {
     primed.current = false;
@@ -301,7 +303,7 @@ function useTrackedBuyFeed() {
   useEffect(() => {
     let stop = false;
     async function tick() {
-      const list = watchingOf(tracked.list);
+      const list = watchingOf(listRef.current);
       if (list.length === 0) {
         setBuys([]);
         return;
@@ -328,7 +330,7 @@ function useTrackedBuyFeed() {
     void tick();
     const id = setInterval(() => void tick(), 8_000);
     return () => { stop = true; clearInterval(id); };
-  }, [watchKey, tracked.list]);
+  }, [watchKey]);
 
   useEffect(() => {
     if (fresh.length === 0) return;

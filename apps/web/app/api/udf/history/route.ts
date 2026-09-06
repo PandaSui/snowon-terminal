@@ -20,6 +20,8 @@ function asRows<T>(r: unknown): T[] {
  * price_eth 全程 ETH 计价,所以这里的聚合对毕业点天然无感——
  * 跨越毕业时刻的那根 bar 会同时含两段成交,价格连续(合约按终端价建池)。
  * 空档周期在下方以前一收盘价补平线,保证低流动性代币的 K 线走势连续。
+ * 只聚合 buy/sell,并丢掉离谱成交(代币↔代币 hop 把另一腿数量写成 ETH
+ * 会出现 6 ETH 的假高点,真实价在 1e-8,整根 K 线被压成一条线)。
  */
 export async function GET(req: NextRequest) {
   try {
@@ -48,7 +50,10 @@ export async function GET(req: NextRequest) {
           FROM trades
           WHERE chain_id = ${CHAIN_ID}
             AND token_address = ${address.toLowerCase()}
-            AND price_eth > 0
+            AND kind IN ('buy', 'sell')
+            AND price_eth > 1e-14
+            AND price_eth < 0.01
+            AND eth_amount::numeric < 1e22
             AND block_timestamp BETWEEN to_timestamp(${from}) AND to_timestamp(${to})
         ),
         ranked AS (
