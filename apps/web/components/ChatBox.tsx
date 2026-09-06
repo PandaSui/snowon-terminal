@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { usePrivy } from "@privy-io/react-auth";
+import { EmojiPicker } from "./EmojiPicker";
 
 interface ChatMsg {
   id: string;
@@ -35,6 +36,7 @@ export function ChatBox({ chainId, tokenAddress }: { chainId: number; tokenAddre
           t: "auth",
           token,
           userId: user?.id ?? `anon:${Math.random().toString(36).slice(2)}`,
+          wallet: user?.wallet?.address,
         }));
         ws.send(JSON.stringify({ t: "join", room }));
       })();
@@ -70,7 +72,12 @@ export function ChatBox({ chainId, tokenAddress }: { chainId: number; tokenAddre
   /** 付费弹幕:5U/条,炫彩字体飘到 K 线图(支付验证待合约,见服务端 DANMAKU_REQUIRE_PAYMENT) */
   function sendDanmaku() {
     if (!dmkInput.trim() || !wsRef.current) return;
-    wsRef.current.send(JSON.stringify({ t: "danmaku", room, content: dmkInput }));
+    wsRef.current.send(JSON.stringify({
+      t: "danmaku",
+      room,
+      content: dmkInput,
+      wallet: user?.wallet?.address,
+    }));
     setDmkInput("");
   }
 
@@ -115,7 +122,7 @@ export function ChatBox({ chainId, tokenAddress }: { chainId: number; tokenAddre
           弹幕
         </button>
       </div>
-      <div style={{ display: "flex", borderTop: "1px solid #1e2329", minWidth: 0 }}>
+      <div style={{ display: "flex", alignItems: "stretch", borderTop: "1px solid #1e2329", minWidth: 0 }}>
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -126,6 +133,7 @@ export function ChatBox({ chainId, tokenAddress }: { chainId: number; tokenAddre
             border: 0, color: "#fff", outline: "none", fontSize: 12,
           }}
         />
+        <EmojiPicker onPick={(e) => setInput((v) => v + e)} />
         <button
           onClick={authenticated ? send : login}
           style={{

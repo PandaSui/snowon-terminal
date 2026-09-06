@@ -13,18 +13,21 @@ function asRows<T>(r: unknown): T[] {
   return [];
 }
 
-/** 协议固定 1% + 创建者买/卖税。买入 ethAmount=用户实付(毛额),卖出=用户实收(净额) */
-function estimateFeesWei(buyVolWei: string, sellVolWei: string, buyTaxBps: number, sellTaxBps: number): string {
-  const buyFeeBps = 100n + BigInt(Math.max(0, buyTaxBps));
-  const sellFeeBps = 100n + BigInt(Math.max(0, sellTaxBps));
+/** 总手续费 = 协议 1% + 估算 Gas。不含创建者税(页面「总税率」另列)。
+ * 买入 ethAmount=用户实付(毛额),卖出=用户实收(净额)。Gas 按每笔约 250k × 1 gwei 估。 */
+const PROTOCOL_BPS = 100n;
+const GAS_PER_TX_WEI = 250_000n * 1_000_000_000n;
+
+function estimateFeesWei(buyVolWei: string, sellVolWei: string, tradeCount: number): string {
   let buyVol = 0n;
   let sellVol = 0n;
   try { buyVol = BigInt(buyVolWei || "0"); } catch { buyVol = 0n; }
   try { sellVol = BigInt(sellVolWei || "0"); } catch { sellVol = 0n; }
-  const buyFees = (buyVol * buyFeeBps) / 10_000n;
-  const sellDenom = 10_000n - sellFeeBps;
-  const sellFees = sellDenom > 0n ? (sellVol * sellFeeBps) / sellDenom : 0n;
-  return (buyFees + sellFees).toString();
+  const buyProto = (buyVol * PROTOCOL_BPS) / 10_000n;
+  const sellDenom = 10_000n - PROTOCOL_BPS;
+  const sellProto = sellDenom > 0n ? (sellVol * PROTOCOL_BPS) / sellDenom : 0n;
+  const gas = BigInt(Math.max(0, tradeCount | 0)) * GAS_PER_TX_WEI;
+  return (buyProto + sellProto + gas).toString();
 }
 
 /** DB 行含 BigInt 列(createdAtBlock 等),JSON.stringify 不认,统一转 string */
@@ -56,6 +59,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ address
           )::int AS "heat24h",
           coalesce(sum(eth_amount) FILTER (WHERE is_buy AND kind IN ('buy', 'sell')), 0)::text AS "buyVol",
           coalesce(sum(eth_amount) FILTER (WHERE NOT is_buy AND kind IN ('buy', 'sell')), 0)::text AS "sellVol",
+          count(*) FILTER (WHERE kind IN ('buy', 'sell'))::int AS "tradeCount",
           (
             SELECT lp.price_eth::text FROM latest_prices lp
             WHERE lp.chain_id = ${CHAIN_ID} AND lp.token_address = ${addr}
@@ -72,7 +76,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ address
     ]);
     if (!t) return NextResponse.json({ error: "not found" }, { status: 404 });
     const agg = asRows<{
-      heat1h: number; heat24h: number; buyVol: string; sellVol: string;
+      heat1h: number; heat24h: number; buyVol: string; sellVol: string; tradeCount: number;
       livePriceEth: string | null; lastPriceEth: string | null;
     }>(aggRows)[0];
     const priceEth = agg?.livePriceEth || agg?.lastPriceEth || null;
@@ -116,7 +120,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ address
       heat24h: agg?.heat24h ?? 0,
       priceEth,
       mcapEth,
-      totalFeesWei: estimateFeesWei(agg?.buyVol ?? "0", agg?.sellVol ?? "0", t.buyTaxBps ?? 0, t.sellTaxBps ?? 0),
+      totalFeesWei: estimateFeesWei(agg?.buyVol ?? "0", agg?.sellVol ?? "0", agg?.tradeCount ?? 0),
     }));
   } catch (e) {
     return apiError(e);

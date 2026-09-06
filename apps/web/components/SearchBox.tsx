@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { readJson } from "@/lib/http";
 import { openWalletTracker } from "@/lib/favorites";
 import { TokenLogo } from "./TokenLogo";
+import { TranslatedText } from "@/lib/useTranslated";
 
 interface SearchToken {
   address: string;
@@ -77,6 +78,7 @@ export function SearchBox() {
     openWalletTracker(address);
     setOpen(false);
     setQ("");
+    router.push("/track");
   }
 
   function copyAddress(address: string) {
@@ -125,7 +127,7 @@ export function SearchBox() {
               <TokenLogo src={modalToken.logoUri} alt={modalToken.symbol} size={56} />
               <div style={{ minWidth: 0, flex: 1 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 18, fontWeight: 800 }}>{modalToken.name}</span>
+                  <span style={{ fontSize: 18, fontWeight: 800 }}><TranslatedText text={modalToken.name} /></span>
                   <span style={{ fontSize: 13, color: "#848e9c", fontWeight: 700 }}>${modalToken.symbol}</span>
                   {modalToken.graduated && (
                     <span style={{ fontSize: 10, color: "#0ecb81", fontWeight: 700, border: "1px solid rgba(14,203,129,0.4)", borderRadius: 4, padding: "1px 5px" }}>
@@ -192,7 +194,7 @@ export function SearchBox() {
                 <DropItem onClick={() => goToken(result.address!)}>
                   <TokenLogo src={result.tokens[0]?.logoUri ?? null} alt={result.tokens[0]?.symbol ?? "?"} size={22} />
                   <span>
-                    <b>{result.tokens[0]?.name}</b> (${result.tokens[0]?.symbol})
+                    <b><TranslatedText text={result.tokens[0]?.name ?? ""} /></b> (${result.tokens[0]?.symbol})
                     <span style={{ color: "#5e6673", marginLeft: 8, fontFamily: "monospace" }}>{result.address}</span>
                   </span>
                   <span style={{ marginLeft: "auto", color: "#f0b90b" }}>查看代币 →</span>
@@ -216,7 +218,7 @@ export function SearchBox() {
               <DropItem key={t.address} onClick={() => goToken(t.address)}>
                 <TokenLogo src={t.logoUri} alt={t.symbol} size={22} />
                 <span>
-                  <b>{t.name}</b> <span style={{ color: "#848e9c" }}>${t.symbol}</span>
+                  <b><TranslatedText text={t.name} /></b> <span style={{ color: "#848e9c" }}>${t.symbol}</span>
                 </span>
                 {t.graduated && <span style={{ color: "#0ecb81", fontSize: 10 }}>已毕业</span>}
               </DropItem>

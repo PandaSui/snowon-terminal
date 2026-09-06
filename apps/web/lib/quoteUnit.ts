@@ -108,3 +108,28 @@ export function fmtPrice(priceEth: string | number | null | undefined, unit: Quo
 export function fmtPriceUsd(priceEth: string | number | null | undefined, ethUsd?: number): string {
   return fmtPrice(priceEth, "usd", ethUsd);
 }
+
+/** 带正负号的盈亏(ETH 数量,非 wei) */
+export function fmtPnl(eth: number, unit: QuoteUnit, ethUsd?: number): string {
+  if (!Number.isFinite(eth)) return unit === "usd" ? "$0" : "0 ETH";
+  const sign = eth > 0 ? "+" : eth < 0 ? "-" : "";
+  const a = Math.abs(eth);
+  if (unit === "usd") {
+    if (!ethUsd || ethUsd <= 0) return "$-";
+    const usd = a * ethUsd;
+    if (usd >= 1000) return `${sign}$${usd.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+    if (usd >= 1) return `${sign}$${usd.toFixed(2)}`;
+    if (usd >= 0.01) return `${sign}$${usd.toFixed(3)}`;
+    return `${sign}$${usd.toPrecision(2)}`;
+  }
+  if (a === 0) return "0 ETH";
+  if (a >= 1) return `${sign}${a.toFixed(4)} ETH`;
+  if (a >= 0.0001) return `${sign}${a.toFixed(5)} ETH`;
+  return `${sign}${a.toPrecision(3)} ETH`;
+}
+
+/** 金额(ETH 数量,非 wei):买入金额等 */
+export function fmtAmount(eth: number, unit: QuoteUnit, ethUsd?: number): string {
+  if (!Number.isFinite(eth) || eth === 0) return unit === "usd" ? "$0" : "0 ETH";
+  return fmtQuote(eth, unit, ethUsd);
+}

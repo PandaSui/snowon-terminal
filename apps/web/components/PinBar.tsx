@@ -22,9 +22,9 @@ export function PinBar({ pins }: { pins: Pin[] }) {
     return (
       <div
         style={{
-          height: 34, display: "flex", alignItems: "center", gap: 10,
-          padding: "0 12px", background: "#10141b", border: "1px dashed #2b3139",
-          borderRadius: 8, overflow: "hidden", fontSize: 11, color: "#3d4450",
+          minHeight: 64, display: "flex", alignItems: "center", gap: 10,
+          padding: "10px 16px", background: "#10141b", border: "1px dashed #2b3139",
+          borderRadius: 10, overflow: "hidden", fontSize: 13, color: "#3d4450",
         }}
       >
         📌 钉住消息展示区 · 付费 20U 让你的消息炫彩置顶 2 分钟
@@ -37,28 +37,28 @@ export function PinBar({ pins }: { pins: Pin[] }) {
   return (
     <div
       style={{
-        height: 34,
+        minHeight: 64,
         display: "flex",
         alignItems: "center",
-        gap: 10,
-        padding: "0 16px",
+        gap: 12,
+        padding: "10px 18px",
         background: "#10141b",
         border: "1px solid #1e2329",
-        borderRadius: 8,
+        borderRadius: 10,
         overflow: "hidden",
-        fontSize: 13,
+        fontSize: 16,
       }}
     >
-      <span style={{ flexShrink: 0, fontSize: 11, color: "#f0b90b", fontWeight: 700, letterSpacing: 1 }}>
+      <span style={{ flexShrink: 0, fontSize: 13, color: "#f0b90b", fontWeight: 800, letterSpacing: 1 }}>
         📌 叮住
       </span>
-      <div style={{ flex: 1, overflow: "hidden", height: "100%", display: "flex", alignItems: "center" }}>
-        <div key={pin.id} className="pin-flip" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-          <span className="pin-flash">{pin.content}</span>
-          <span style={{ color: "#848e9c", fontSize: 11, marginLeft: 10 }}>— {pin.username}</span>
+      <div style={{ flex: 1, overflow: "hidden", minHeight: 36, display: "flex", alignItems: "center" }}>
+        <div key={pin.id} className="pin-flip" style={{ lineHeight: 1.35 }}>
+          <span className="pin-flash" style={{ fontSize: 16 }}>{pin.content}</span>
+          <span style={{ color: "#848e9c", fontSize: 12, marginLeft: 10 }}>— {pin.username}</span>
         </div>
       </div>
-      <span style={{ flexShrink: 0, fontSize: 11, color: "#5e6673" }}>
+      <span style={{ flexShrink: 0, fontSize: 12, color: "#5e6673" }}>
         {idx + 1}/{pins.length} · 剩 {remain}s
       </span>
     </div>

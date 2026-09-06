@@ -43,6 +43,7 @@ export async function GET() {
       WITH listed AS (
         SELECT
           t.address,
+          t.creator,
           t.name,
           t.symbol,
           t.logo_uri       AS "logoUri",
@@ -146,10 +147,19 @@ export async function GET() {
         END AS "volRank",
         coalesce(hs."top10Share", '0') AS "top10Share",
         coalesce(ps."phishShare", '0') AS "phishShare",
+        (coalesce(cpos.bal, 0) / 1e18)::text AS "creatorBal",
         spark.prices AS spark
       FROM listed l
       LEFT JOIN holder_stats hs ON hs.token_address = l.address
       LEFT JOIN phish_stats ps ON ps.token_address = l.address
+      LEFT JOIN LATERAL (
+        SELECT p.balance::numeric AS bal
+        FROM positions p
+        WHERE p.chain_id = ${CHAIN_ID}
+          AND p.token_address = l.address
+          AND p.wallet = l.creator
+        LIMIT 1
+      ) cpos ON true
       LEFT JOIN LATERAL (
         SELECT array_agg(x.price_eth ORDER BY x.block_timestamp ASC) AS prices
         FROM (
@@ -162,10 +172,14 @@ export async function GET() {
       ) spark ON true
     `);
 
-    const rows = asRows<Record<string, unknown>>(res).map((r) => ({
-      ...r,
-      spark: parseSpark(r.spark),
-    }));
+    const rows = asRows<Record<string, unknown>>(res).map((r) => {
+      const creatorBal = Number(r.creatorBal ?? 0);
+      return {
+        ...r,
+        spark: parseSpark(r.spark),
+        devDumped: !Number.isFinite(creatorBal) || creatorBal < 1,
+      };
+    });
     listCache.set(rows);
     return NextResponse.json(rows, {
       headers: { "Cache-Control": "public, max-age=1, s-maxage=2, stale-while-revalidate=8" },

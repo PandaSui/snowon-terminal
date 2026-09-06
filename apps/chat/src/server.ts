@@ -5,7 +5,7 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { PrivyClient } from "@privy-io/server-auth";
 import { createDb } from "@terminal/db";
 import { chatMessages, chatUsers } from "@terminal/db";
-import { holdingShareBps } from "./holdings.js";
+import { holdingShareBps, totalBoughtEth } from "./holdings.js";
 
 // Privy JWT 服务端校验:配了 PRIVY_APP_ID + PRIVY_APP_SECRET 才启用;
 // 未配置=本地开发模式,信任客户端传来的 userId(骨架行为,上线前必须配置)
@@ -37,6 +37,7 @@ if (!privy) console.warn("[chat] PRIVY_APP_SECRET 未配置:auth 为开发模式
 interface ClientCtx {
   ws: WebSocket;
   userId?: string;
+  wallet?: string;
   rooms: Set<string>;
 }
 
@@ -187,7 +188,7 @@ async function sendHistory(ctx: ClientCtx, room: string) {
 }
 
 async function handleMessage(ctx: ClientCtx, raw: string) {
-  let msg: { t: string; room?: string; content?: string; clientMsgId?: string; replyTo?: number; userId?: string; token?: string; payTxHash?: string };
+  let msg: { t: string; room?: string; content?: string; clientMsgId?: string; replyTo?: number; userId?: string; token?: string; payTxHash?: string; wallet?: string };
   try {
     msg = JSON.parse(raw);
   } catch {
@@ -207,7 +208,14 @@ async function handleMessage(ctx: ClientCtx, raw: string) {
     } else {
       ctx.userId = msg.userId;
     }
-    if (ctx.userId) await ensureUser(ctx.userId);
+    if (ctx.userId) {
+      await ensureUser(ctx.userId);
+      const w = typeof msg.wallet === "string" ? msg.wallet.toLowerCase() : "";
+      if (/^0x[0-9a-f]{40}$/.test(w)) {
+        ctx.wallet = w;
+        await db.update(chatUsers).set({ walletAddress: w }).where(eq(chatUsers.id, ctx.userId)).catch(() => {});
+      }
+    }
     return;
   }
 
@@ -268,12 +276,23 @@ async function handleMessage(ctx: ClientCtx, raw: string) {
     }
     lastSent.set(key, now);
     const user = await db.select().from(chatUsers).where(eq(chatUsers.id, ctx.userId)).limit(1);
+    const [chainIdStr, token] = msg.room.split(":");
+    const chainId = Number(chainIdStr);
+    const walletHint = typeof msg.wallet === "string" ? msg.wallet.toLowerCase() : "";
+    const wallet = ctx.wallet
+      ?? user[0]?.walletAddress?.toLowerCase()
+      ?? (/^0x[0-9a-f]{40}$/.test(walletHint) ? walletHint : "");
+    let buyEth = 0;
+    if (wallet && token && token !== "global" && Number.isFinite(chainId)) {
+      buyEth = await totalBoughtEth(db, chainId, wallet, token).catch(() => 0);
+    }
     emit(msg.room, {
       t: "danmaku",
       room: msg.room,
       id: crypto.randomUUID(),
       username: user[0]?.username ?? "anon",
       content,
+      buyEth,
     });
     return;
   }

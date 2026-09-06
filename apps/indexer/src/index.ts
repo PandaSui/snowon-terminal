@@ -80,6 +80,24 @@ async function getLogsWithRetry(
   }
 }
 
+async function getBlockNumberWithRetry(
+  client: ReturnType<typeof clientFor>,
+  tries = 10,
+): Promise<bigint> {
+  for (let i = 0; ; i++) {
+    try {
+      return await client.getBlockNumber();
+    } catch (e: unknown) {
+      const text = errText(e);
+      const is429 = (e as { code?: number })?.code === 429 || text.includes("Too Many Requests");
+      if (!is429 || i >= tries) throw e;
+      const wait = Math.min(2000 * 2 ** i, 60_000);
+      console.log(`  rate limited (getBlockNumber), retry in ${wait / 1000}s ...`);
+      await new Promise((r) => setTimeout(r, wait));
+    }
+  }
+}
+
 function curveFromCreated(log: Log): Address | null {
   const curve = (log as Log & { args?: { curve?: Address } }).args?.curve;
   return curve ? (curve.toLowerCase() as Address) : null;
@@ -88,13 +106,6 @@ function curveFromCreated(log: Log): Address | null {
 function poolFromGrad(log: Log): Hex | null {
   const id = (log as Log & { args?: { poolId?: string } }).args?.poolId;
   return id ? (id.toLowerCase() as Hex) : null;
-}
-
-function serialQueue(onErr: (e: unknown) => void) {
-  let tail = Promise.resolve();
-  return (fn: () => Promise<void>) => {
-    tail = tail.then(fn).catch(onErr);
-  };
 }
 
 async function runChain(cfg: ChainConfig, db: ReturnType<typeof createDb>, redis: Redis) {
@@ -114,7 +125,7 @@ async function runChain(cfg: ChainConfig, db: ReturnType<typeof createDb>, redis
 
   const stored = await loadCursor(db, cfg.chainId);
   let from = stored != null ? stored + 1n : cfg.deployBlock;
-  let head = await client.getBlockNumber();
+  let head = await getBlockNumberWithRetry(client);
   console.log(`[chain ${cfg.chainId}] backfilling ${from} → ${head} (cursor=${stored ?? "none"})`);
 
   async function fetchCurveLogs(fromBlock: bigint, toBlock: bigint, curves: Address[]) {
@@ -202,87 +213,35 @@ async function runChain(cfg: ChainConfig, db: ReturnType<typeof createDb>, redis
     }
   }
 
+  let batches = 0;
   while (from <= head) {
     const to = from + BATCH - 1n > head ? head : from + BATCH - 1n;
     await processRange(from, to);
     await saveCursor(db, cfg.chainId, to);
-    if (from % (BATCH * 20n) === 0n) console.log(`[chain ${cfg.chainId}] backfill ${to}/${head}`);
+    batches++;
+    if (batches % 10 === 0 || to === head) {
+      console.log(`[chain ${cfg.chainId}] backfill ${to}/${head}`);
+    }
     from = to + 1n;
     if (from <= head) continue;
     // 追上头部后再看是否有新块;回填过程中不 sleep
-    head = await client.getBlockNumber();
+    head = await getBlockNumberWithRetry(client);
   }
-  console.log(`[chain ${cfg.chainId}] backfill done, starting live watchers from ${head}`);
+  console.log(`[chain ${cfg.chainId}] backfill done at ${head}`);
 
-  const qPools = (await db
-    .select({
-      address: tokens.address,
-      poolId: tokens.poolId,
-      quoteAsset: tokens.quoteAsset,
-      createdAtBlock: tokens.createdAtBlock,
-    })
-    .from(tokens)
-    .where(eq(tokens.chainId, cfg.chainId)))
-    .filter((r) => r.poolId && r.quoteAsset && r.quoteAsset.toLowerCase() !== zeroAddress);
-  if (qPools.length > 0) {
-    console.log(`[chain ${cfg.chainId}] backfilling Q-pool swaps for ${qPools.length} graduated tokens`);
-    for (const t of qPools) {
-      let pf = t.createdAtBlock ?? cfg.deployBlock;
-      if (pf > head) continue;
-      while (pf <= head) {
-        const pt = pf + BATCH - 1n > head ? head : pf + BATCH - 1n;
-        const logs = await getLogsWithRetry(client, {
-          address: cfg.poolManager,
-          event: evSwap,
-          args: { id: t.poolId as Hex },
-          fromBlock: pf,
-          toBlock: pt,
-        } as GetLogsArgs);
-        logs.sort(logOrder);
-        if (logs.length > 0) {
-          console.log(`[chain ${cfg.chainId}] Q-pool ${t.address.slice(0, 10)} ${logs.length} swaps blocks ${pf}-${pt}`);
-        }
-        await h.prefetchBlockTimes(logs.map((l) => l.blockNumber));
-        for (const l of logs) await h.onPoolSwap(l as never);
-        pf = pt + 1n;
-      }
-    }
-    console.log(`[chain ${cfg.chainId}] Q-pool swap backfill done`);
-  }
-  await h.refreshGraduatedSpotPrices();
-  console.log(`[chain ${cfg.chainId}] graduated spot prices refreshed`);
-
-  const enqueue = serialQueue(onErr);
-
-  async function handleLive(logs: Log[], kind: "created" | "buy" | "sell" | "grad" | "swap" | "liq") {
-    const sorted = [...logs].sort(logOrder);
-    await h.prefetchBlockTimes(sorted.map((l) => l.blockNumber));
-    for (const l of sorted) {
-      if (kind === "created") {
-        await h.onCoinCreated(l as never);
-        const curve = curveFromCreated(l);
-        if (curve) curveSet.add(curve);
-      } else if (kind === "buy") await h.onCurveTrade(l as never, true);
-      else if (kind === "sell") await h.onCurveTrade(l as never, false);
-      else if (kind === "grad") {
-        const poolId = await h.onGraduated(l as never);
-        if (poolId) poolSet.add(poolId.toLowerCase() as Hex);
-      } else if (kind === "liq") await h.onModifyLiquidity(l as never);
-      else await h.onPoolSwap(l as never);
-    }
-  }
-
-  // 实时监听:自研轮询替代 watchEvent——
+  // 实时监听必须立刻挂上,不能等毕业池历史 Swap 回填(可能扫上百万块)。
+  // 自研轮询替代 watchEvent:
   // 1) 该 RPC 不支持 eth_newFilter(viem 默认 filter 模式静默收不到事件);
   // 2) watchEvent 轮询命中"日志超 1 万条"会卡死在同一区间,而 processRange
   //    走 getLogsWithRetry 会自动对半拆分,且 Swap 按 poolId 过滤,量小。
-  let liveFrom = head + 1n;
+  const liveHead = head;
+  let liveFrom = liveHead + 1n;
   let liveBusy = false;
   async function liveTick() {
     if (liveBusy) return;
     liveBusy = true;
     try {
-      const now = await client.getBlockNumber();
+      const now = await getBlockNumberWithRetry(client);
       if (now >= liveFrom) {
         await processRange(liveFrom, now);
         liveFrom = now + 1n;
@@ -296,9 +255,50 @@ async function runChain(cfg: ChainConfig, db: ReturnType<typeof createDb>, redis
   }
   setInterval(() => void liveTick(), 2_000);
   void liveTick();
+  console.log(`[chain ${cfg.chainId}] live watchers started from ${liveFrom}`);
 
   setInterval(() => rescoreRecentTokens(db, cfg.chainId).catch(onErr), 10 * 60 * 1000);
   void enrichMissingTokenMeta(db, cfg.chainId).catch(onErr);
+
+  void (async () => {
+    const qPools = (await db
+      .select({
+        address: tokens.address,
+        poolId: tokens.poolId,
+        quoteAsset: tokens.quoteAsset,
+        createdAtBlock: tokens.createdAtBlock,
+      })
+      .from(tokens)
+      .where(eq(tokens.chainId, cfg.chainId)))
+      .filter((r) => r.poolId && r.quoteAsset && r.quoteAsset.toLowerCase() !== zeroAddress);
+    if (qPools.length > 0) {
+      console.log(`[chain ${cfg.chainId}] backfilling Q-pool swaps for ${qPools.length} graduated tokens`);
+      for (const t of qPools) {
+        let pf = t.createdAtBlock ?? cfg.deployBlock;
+        if (pf > liveHead) continue;
+        while (pf <= liveHead) {
+          const pt = pf + BATCH - 1n > liveHead ? liveHead : pf + BATCH - 1n;
+          const logs = await getLogsWithRetry(client, {
+            address: cfg.poolManager,
+            event: evSwap,
+            args: { id: t.poolId as Hex },
+            fromBlock: pf,
+            toBlock: pt,
+          } as GetLogsArgs);
+          logs.sort(logOrder);
+          if (logs.length > 0) {
+            console.log(`[chain ${cfg.chainId}] Q-pool ${t.address.slice(0, 10)} ${logs.length} swaps blocks ${pf}-${pt}`);
+          }
+          await h.prefetchBlockTimes(logs.map((l) => l.blockNumber));
+          for (const l of logs) await h.onPoolSwap(l as never);
+          pf = pt + 1n;
+        }
+      }
+      console.log(`[chain ${cfg.chainId}] Q-pool swap backfill done`);
+    }
+    await h.refreshGraduatedSpotPrices();
+    console.log(`[chain ${cfg.chainId}] graduated spot prices refreshed`);
+  })().catch(onErr);
 }
 
 async function main() {

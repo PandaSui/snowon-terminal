@@ -2,6 +2,7 @@
 
 import { apiUrl } from "@/lib/apiBase";
 import { useMemo, useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { readJson } from "@/lib/http";
 import { addressUrl, txUrl } from "@/lib/explorers";
@@ -116,6 +117,7 @@ function WalletSheet({
 }: {
   token: string; wallet: string; ethUsd?: number; onClose: () => void;
 }) {
+  const router = useRouter();
   const { data, isLoading } = useQuery({
     queryKey: ["trader-stats", token, wallet],
     queryFn: async () => {
@@ -127,7 +129,7 @@ function WalletSheet({
     <div style={{ borderTop: "1px solid #2b3139", background: "#10141b", padding: "8px 10px 10px", flexShrink: 0 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
         <span style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 700 }}>{shortAddr(wallet)}</span>
-        <button type="button" onClick={() => openWalletTracker(wallet)} style={{ fontSize: 10, color: "#f0b90b", background: "none", border: 0, cursor: "pointer" }}>追踪</button>
+        <button type="button" onClick={() => { openWalletTracker(wallet); router.push("/track"); }} style={{ fontSize: 10, color: "#f0b90b", background: "none", border: 0, cursor: "pointer" }}>追踪</button>
         <a href={addressUrl(CHAIN_ID, wallet)} target="_blank" rel="noreferrer" style={{ fontSize: 10, color: "#5e6673" }}>浏览器</a>
         <button type="button" onClick={onClose} style={{ marginLeft: "auto", background: "none", border: 0, color: "#848e9c", cursor: "pointer", fontSize: 14 }}>×</button>
       </div>

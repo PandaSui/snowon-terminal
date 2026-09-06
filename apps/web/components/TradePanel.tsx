@@ -367,6 +367,10 @@ export function TradePanel({
 
         <div style={{ fontSize: 11, color: "#848e9c", marginBottom: 12, lineHeight: 1.6 }}>
           {graduated ? "毕业后走 SnowSwapRouter(V4)" : "曲线直购"}
+          {" · "}
+          <span title="不含创建者税,税率见代币信息条">
+            手续费 协议 1% + Gas
+          </span>
           {antiBundle && !graduated && <span style={{ color: "#f0b90b" }}> · ⚠ antiBundle:仅 EOA 可买</span>}
         </div>
 

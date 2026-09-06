@@ -25,3 +25,32 @@ export async function holdingShareBps(
   if (t === 0) return null;
   return Math.round((Number(mine) / t) * 10_000);
 }
+
+function asRows<T>(r: unknown): T[] {
+  if (Array.isArray(r)) return r as T[];
+  if (r && typeof r === "object" && Array.isArray((r as { rows?: unknown }).rows)) {
+    return (r as { rows: T[] }).rows;
+  }
+  return [];
+}
+
+/** 某钱包在该代币上累计买入的 ETH(whole,非 wei)。无记录返回 0。 */
+export async function totalBoughtEth(
+  db: Db,
+  chainId: number,
+  wallet: string,
+  token: string,
+): Promise<number> {
+  const rows = asRows<{ eth: string }>(
+    await db.execute(sql`
+      SELECT coalesce(total_bought_eth::numeric / 1e18, 0)::text AS eth
+      FROM positions
+      WHERE chain_id = ${chainId}
+        AND wallet = ${wallet.toLowerCase()}
+        AND token_address = ${token.toLowerCase()}
+      LIMIT 1
+    `),
+  );
+  const n = Number(rows[0]?.eth ?? 0);
+  return Number.isFinite(n) ? n : 0;
+}

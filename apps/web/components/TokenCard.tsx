@@ -8,6 +8,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { TokenLogo } from "./TokenLogo";
 import { FAVORITES_EVENT, isFavorite, toggleFavorite } from "@/lib/favorites";
 import { readJson } from "@/lib/http";
+import { t as tr, useLocale } from "@/lib/locale";
+import { useTranslatedTexts } from "@/lib/useTranslated";
+import { TwitterPreview } from "./TwitterPreview";
 
 export interface HomeToken {
   address: string;
@@ -37,6 +40,9 @@ export interface HomeToken {
   phishShare?: string | null;
   bundleScore?: number | null;
   spark?: number[];
+  creator?: string | null;
+  creatorBal?: string | null;
+  devDumped?: boolean;
 }
 
 function numShare(v: string | null | undefined): number | null {
@@ -197,8 +203,18 @@ function sameSpark(a?: number[], b?: number[]) {
   return a[0] === b[0] && a[a.length - 1] === b[b.length - 1];
 }
 
+function fmtMult(pct: string | null): string | null {
+  if (pct == null) return null;
+  const v = Number(pct);
+  if (!Number.isFinite(v) || v < 0.2) return null;
+  const x = 1 + v;
+  if (x < 1.2) return null;
+  return `x${x >= 10 ? x.toFixed(0) : x.toFixed(1)}`.replace(/\.0$/, "");
+}
+
 /** 主页代币小卡片:火花线背景 + Top10/捆绑/钓鱼警告色 + 美元市值 + 社交 logo + hover 预读 */
-function TokenCardInner({ t }: { t: HomeToken }) {
+function TokenCardInner({ t, showMultiplier }: { t: HomeToken; showMultiplier?: boolean }) {
+  const [locale] = useLocale();
   const change = fmtChange(t.change24hPct);
   const progress = t.graduated ? null : Math.min(1, Math.max(0, Number(t.graduationProgress ?? 0)));
   const [fav, setFav] = useState(false);
@@ -217,6 +233,7 @@ function TokenCardInner({ t }: { t: HomeToken }) {
   const sparkUp = spark.length >= 2 ? spark[spark.length - 1] >= spark[0] : change.color === "#0ecb81";
 
   const description = extra.description ?? t.description;
+  const [nameT, descT] = useTranslatedTexts([t.name, description ?? ""]);
   const skill = extra.skill ?? t.skill;
   const socials = [
     isHttp(extra.twitter ?? t.twitter) && { href: extra.twitter ?? t.twitter!, kind: "x" as const, title: extra.twitter ?? t.twitter! },
@@ -260,11 +277,26 @@ function TokenCardInner({ t }: { t: HomeToken }) {
           marginBottom: 8,
           background: "#0f1319",
           cursor: "pointer",
-          overflow: "hidden",
+          overflow: "visible",
         }}
       >
-        <Sparkline prices={spark} up={sparkUp} id={t.address.slice(2, 10)} />
+        <div style={{ position: "absolute", inset: 0, overflow: "hidden", borderRadius: 8, pointerEvents: "none", zIndex: 0 }}>
+          <Sparkline prices={spark} up={sparkUp} id={t.address.slice(2, 10)} />
+        </div>
 
+        {showMultiplier && fmtMult(t.change24hPct) && (
+          <span
+            title="相对 24h 起点的倍数"
+            style={{
+              position: "absolute", top: 4, right: 32, zIndex: 2,
+              fontSize: 16, fontWeight: 800, fontStyle: "italic", color: "#0ecb81",
+              letterSpacing: 0.3, textShadow: "0 1px 6px rgba(0,0,0,0.55)",
+              fontVariantNumeric: "tabular-nums", pointerEvents: "none",
+            }}
+          >
+            {fmtMult(t.change24hPct)}
+          </span>
+        )}
         <span
           onClick={(e) => {
             e.preventDefault();
@@ -286,7 +318,7 @@ function TokenCardInner({ t }: { t: HomeToken }) {
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <span style={{ fontWeight: 700, fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {t.name}
+                  {nameT || t.name}
                 </span>
                 {hot && (
                   <span
@@ -315,9 +347,13 @@ function TokenCardInner({ t }: { t: HomeToken }) {
 
           {socials.length > 0 && (
             <div style={{ display: "flex", gap: 5, marginTop: 8 }}>
-              {socials.map((s) => (
-                <SocialIcon key={s.kind} href={s.href} kind={s.kind} title={s.title} />
-              ))}
+              {socials.map((s) =>
+                s.kind === "x" ? (
+                  <TwitterPreview key="x" href={s.href} compact />
+                ) : (
+                  <SocialIcon key={s.kind} href={s.href} kind={s.kind} title={s.title} />
+                ),
+              )}
             </div>
           )}
 
@@ -329,15 +365,15 @@ function TokenCardInner({ t }: { t: HomeToken }) {
 
           <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginTop: 8, fontSize: 12 }}>
             <span style={{ color: "#848e9c", whiteSpace: "nowrap" }}>
-              市值 <span style={{ color: "#eaecef", fontWeight: 700 }}>{fmtUsd(t.mcapEth, eth?.price)}</span>
+              {tr(locale, "mcap")} <span style={{ color: "#eaecef", fontWeight: 700 }}>{fmtUsd(t.mcapEth, eth?.price)}</span>
             </span>
             <span style={{ color: "#848e9c", whiteSpace: "nowrap" }} title="24小时成交量">
-              量 <span style={{ color: hot ? "#ff8a00" : "#eaecef", fontWeight: 700 }}>
+              {tr(locale, "vol")} <span style={{ color: hot ? "#ff8a00" : "#eaecef", fontWeight: 700 }}>
                 {vol24 > 0 ? fmtUsd(String(vol24), eth?.price) : "-"}
               </span>
             </span>
             {t.graduated ? (
-              <span style={{ color: "#0ecb81", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>✅ 已毕业</span>
+              <span style={{ color: "#0ecb81", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>✅ {tr(locale, "graduatedTag")}</span>
             ) : (
               <span style={{ color: "#f0b90b", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>
                 {((progress ?? 0) * 100).toFixed(1)}%
@@ -369,7 +405,7 @@ function TokenCardInner({ t }: { t: HomeToken }) {
               {skill && (
                 <span style={{ color: "#5e8bff", fontWeight: 700, marginRight: 6 }}>{skill}</span>
               )}
-              {description}
+              {descT || description}
             </div>
           )}
         </div>
@@ -382,6 +418,7 @@ export const TokenCard = memo(TokenCardInner, (prev, next) => {
   const a = prev.t;
   const b = next.t;
   return (
+    prev.showMultiplier === next.showMultiplier &&
     a.address === b.address &&
     a.priceEth === b.priceEth &&
     a.change24hPct === b.change24hPct &&

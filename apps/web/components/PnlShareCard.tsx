@@ -1,7 +1,7 @@
 "use client";
 
 import { apiUrl } from "@/lib/apiBase";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePrivy } from "@privy-io/react-auth";
 import { useQuery } from "@tanstack/react-query";
 import { readJson } from "@/lib/http";
@@ -14,11 +14,96 @@ interface Position {
   valueEth: string | null;
 }
 
-/** 我的 PNL 卡(可分享):登录且持有该代币时显示;分享=复制战报文本到剪贴板 */
+const SLOGAN = "SnowOn Terminal · 发现下一个 100x";
+const CARD_W = 720;
+const CARD_H = 420;
+
+function shortAddr(a: string) {
+  return `${a.slice(0, 6)}…${a.slice(-4)}`;
+}
+
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+
+async function drawCard(opts: {
+  bg: HTMLImageElement | null;
+  symbol: string;
+  buyPrice: string;
+  amount: string;
+  pnl: string;
+  pct: string;
+  addr: string;
+  positive: boolean;
+}): Promise<Blob> {
+  const canvas = document.createElement("canvas");
+  canvas.width = CARD_W;
+  canvas.height = CARD_H;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("canvas");
+
+  if (opts.bg) {
+    const scale = Math.max(CARD_W / opts.bg.width, CARD_H / opts.bg.height);
+    const w = opts.bg.width * scale;
+    const h = opts.bg.height * scale;
+    ctx.drawImage(opts.bg, (CARD_W - w) / 2, (CARD_H - h) / 2, w, h);
+  } else {
+    const g = ctx.createLinearGradient(0, 0, CARD_W, CARD_H);
+    g.addColorStop(0, "#0b1220");
+    g.addColorStop(1, "#1a1030");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, CARD_W, CARD_H);
+  }
+  ctx.fillStyle = "rgba(8,10,16,0.58)";
+  ctx.fillRect(0, 0, CARD_W, CARD_H);
+
+  ctx.fillStyle = "#f0b90b";
+  ctx.font = "800 22px system-ui, sans-serif";
+  ctx.fillText("SnowOn Terminal", 36, 48);
+
+  ctx.fillStyle = "#eaecef";
+  ctx.font = "800 42px system-ui, sans-serif";
+  ctx.fillText(`$${opts.symbol}`, 36, 108);
+
+  ctx.fillStyle = opts.positive ? "#0ecb81" : "#f6465d";
+  ctx.font = "italic 800 56px system-ui, sans-serif";
+  ctx.fillText(opts.pct, 36, 178);
+
+  ctx.fillStyle = "#b7bcc5";
+  ctx.font = "600 18px system-ui, sans-serif";
+  ctx.fillText(`买入价格  ${opts.buyPrice}`, 36, 240);
+  ctx.fillText(`投入金额  ${opts.amount}`, 36, 272);
+  ctx.fillStyle = opts.positive ? "#0ecb81" : "#f6465d";
+  ctx.fillText(`盈利金额  ${opts.pnl}`, 36, 304);
+
+  ctx.fillStyle = "#f0b90b";
+  ctx.font = "600 16px system-ui, sans-serif";
+  ctx.fillText(SLOGAN, 36, CARD_H - 48);
+
+  ctx.fillStyle = "#848e9c";
+  ctx.font = "500 16px ui-monospace, monospace";
+  ctx.fillText(opts.addr, CARD_W - 36 - ctx.measureText(opts.addr).width, CARD_H - 48);
+
+  return await new Promise((resolve, reject) => {
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("blob"))), "image/png");
+  });
+}
+
+/** 我的 PNL 卡:自定义背景图,卡片含买入价/金额/盈利/%/标语/截断地址 */
 export function PnlShareCard({ tokenAddress, symbol }: { tokenAddress: string; symbol: string }) {
   const { authenticated, user } = usePrivy();
   const address = user?.wallet?.address?.toLowerCase();
-  const [copied, setCopied] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [bgUrl, setBgUrl] = useState<string | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const { data: positions } = useQuery({
     queryKey: ["portfolio", address],
@@ -31,49 +116,162 @@ export function PnlShareCard({ tokenAddress, symbol }: { tokenAddress: string; s
     },
   });
 
-  if (!authenticated || !address) return null;
   const pos = positions?.find((p) => p.tokenAddress.toLowerCase() === tokenAddress.toLowerCase());
-  if (!pos) return null;
-
-  const value = Number(pos.valueEth ?? 0);
-  const cost = Number(pos.costBasisEth ?? 0);
+  const value = Number(pos?.valueEth ?? 0);
+  const cost = Number(pos?.costBasisEth ?? 0);
+  const bal = Number(pos?.balanceWhole ?? 0);
   const unrealized = value - cost;
-  const realized = Number(pos.realizedPnlEth ?? 0);
+  const realized = Number(pos?.realizedPnlEth ?? 0);
   const total = unrealized + realized;
   const pct = cost > 0 ? (unrealized / cost) * 100 : 0;
+  const buyPrice = bal > 0 ? cost / bal : 0;
   const positive = total >= 0;
+  const stats = {
+    buyPrice: `${buyPrice.toPrecision(4)} ETH`,
+    amount: `${cost.toFixed(4)} ETH`,
+    pnl: `${positive ? "+" : ""}${total.toFixed(4)} ETH`,
+    pct: `${positive ? "+" : ""}${pct.toFixed(1)}%`,
+    addr: address ? shortAddr(address) : "",
+    positive,
+  };
 
-  async function share() {
-    const text = `我在 SnowOn Terminal 交易 $${symbol},当前盈亏 ${positive ? "+" : ""}${total.toFixed(4)} ETH(${positive ? "+" : ""}${pct.toFixed(1)}%)🚀 ${window.location.href}`;
+  useEffect(() => () => { if (bgUrl) URL.revokeObjectURL(bgUrl); }, [bgUrl]);
+  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
+
+  async function renderBlob(): Promise<Blob> {
+    const bg = bgUrl ? await loadImage(bgUrl) : null;
+    return drawCard({ bg, symbol, ...stats });
+  }
+
+  useEffect(() => {
+    if (!open || !pos) return;
+    let cancelled = false;
+    setBusy(true);
+    void (async () => {
+      try {
+        const blob = await renderBlob();
+        if (cancelled) return;
+        setPreview((prev) => {
+          if (prev) URL.revokeObjectURL(prev);
+          return URL.createObjectURL(blob);
+        });
+      } catch { /* ignore */ }
+      if (!cancelled) setBusy(false);
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, bgUrl, pos?.tokenAddress, stats.pnl, stats.pct]);
+
+  if (!authenticated || !address || !pos) return null;
+
+  async function download() {
+    const blob = await renderBlob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `snowon-${symbol}-pnl.png`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  async function copyImage() {
+    const blob = await renderBlob();
     try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch { /* 剪贴板不可用时静默 */ }
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+    } catch {
+      await navigator.clipboard.writeText(
+        `我在 SnowOn Terminal 交易 $${symbol} · 买入 ${stats.buyPrice} · ${stats.pnl} (${stats.pct}) ${SLOGAN}`,
+      );
+    }
   }
 
   return (
-    <div
-      style={{
-        display: "flex", alignItems: "center", gap: 12, padding: "8px 12px",
-        borderRadius: 8, fontSize: 12,
-        border: `1px solid ${positive ? "#0ecb8144" : "#f6465d44"}`,
-        background: positive ? "rgba(14,203,129,0.06)" : "rgba(246,70,93,0.06)",
-      }}
-    >
-      <span style={{ color: "#848e9c" }}>我的 PNL</span>
-      <span style={{ fontWeight: 800, color: positive ? "#0ecb81" : "#f6465d", fontVariantNumeric: "tabular-nums" }}>
-        {positive ? "+" : ""}{total.toFixed(4)} ETH ({positive ? "+" : ""}{pct.toFixed(1)}%)
-      </span>
-      <button
-        onClick={share}
+    <>
+      <div
         style={{
-          marginLeft: "auto", padding: "4px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer",
-          borderRadius: 6, border: "1px solid #2b3139", background: "transparent", color: "#848e9c",
+          display: "flex", alignItems: "center", gap: 12, padding: "8px 12px",
+          borderRadius: 8, fontSize: 12,
+          border: `1px solid ${positive ? "#0ecb8144" : "#f6465d44"}`,
+          background: positive ? "rgba(14,203,129,0.06)" : "rgba(246,70,93,0.06)",
         }}
       >
-        {copied ? "✅ 已复制" : "📤 分享"}
-      </button>
-    </div>
+        <span style={{ color: "#848e9c" }}>我的 PNL</span>
+        <span style={{ fontWeight: 800, color: positive ? "#0ecb81" : "#f6465d", fontVariantNumeric: "tabular-nums" }}>
+          {stats.pnl} ({stats.pct})
+        </span>
+        <button
+          onClick={() => setOpen(true)}
+          style={{
+            marginLeft: "auto", padding: "4px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer",
+            borderRadius: 6, border: "1px solid #2b3139", background: "transparent", color: "#848e9c",
+          }}
+        >
+          📤 分享卡片
+        </button>
+      </div>
+
+      {open && (
+        <div
+          onClick={() => setOpen(false)}
+          style={{
+            position: "fixed", inset: 0, zIndex: 90, background: "rgba(0,0,0,0.62)",
+            display: "flex", alignItems: "center", justifyContent: "center", padding: 16,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: 520, maxWidth: "100%", background: "#0d1117", border: "1px solid #2b3139",
+              borderRadius: 12, overflow: "hidden", boxShadow: "0 20px 60px rgba(0,0,0,0.55)",
+            }}
+          >
+            <div style={{ padding: "12px 14px", borderBottom: "1px solid #1e2329", fontWeight: 700, fontSize: 13 }}>
+              分享 PNL 卡片
+              <span style={{ marginLeft: 8, fontSize: 11, color: "#5e6673", fontWeight: 400 }}>可上传自定义背景</span>
+            </div>
+            <div style={{ padding: 14 }}>
+              {preview ? (
+                <img src={preview} alt="PNL card" style={{ width: "100%", borderRadius: 8, display: "block" }} />
+              ) : (
+                <div style={{ height: 200, display: "flex", alignItems: "center", justifyContent: "center", color: "#5e6673", fontSize: 12 }}>
+                  {busy ? "生成中…" : "预览"}
+                </div>
+              )}
+              <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/*"
+                  hidden
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    setBgUrl((prev) => {
+                      if (prev) URL.revokeObjectURL(prev);
+                      return URL.createObjectURL(file);
+                    });
+                  }}
+                />
+                <button
+                  onClick={() => fileRef.current?.click()}
+                  style={shareBtn}
+                >
+                  上传背景
+                </button>
+                <button onClick={() => void download()} style={shareBtn}>下载 PNG</button>
+                <button onClick={() => void copyImage()} style={{ ...shareBtn, background: "#f0b90b", color: "#000", border: 0 }}>
+                  复制卡片
+                </button>
+                <button onClick={() => setOpen(false)} style={{ ...shareBtn, marginLeft: "auto" }}>关闭</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
+
+const shareBtn: React.CSSProperties = {
+  padding: "7px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer",
+  borderRadius: 6, border: "1px solid #2b3139", background: "transparent", color: "#eaecef",
+};

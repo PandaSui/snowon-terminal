@@ -21,10 +21,13 @@ import { FavoritesBar } from "@/components/FavoritesBar";
 import { SearchBox } from "@/components/SearchBox";
 import { AiPanel } from "@/components/AiPanel";
 import { PortfolioPanel } from "@/components/PortfolioPanel";
+import { AppNav } from "@/components/AppNav";
 import { readJson } from "@/lib/http";
 import { useIsMobile } from "@/lib/useIsMobile";
 import { FAVORITES_EVENT, isFavorite, toggleFavorite } from "@/lib/favorites";
 import { fmtMcapUsd, fmtPriceUsd, fmtUsdCompact, weiToEth } from "@/lib/quoteUnit";
+import { useTranslatedTexts } from "@/lib/useTranslated";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import type { HomeToken } from "@/components/TokenCard";
 import type { ChartResolution } from "@/lib/chartResolutions";
 
@@ -188,6 +191,7 @@ export default function TokenPage() {
     },
     refetchInterval: 10_000,
   });
+  const [nameT, descT] = useTranslatedTexts([token?.name ?? "", token?.description ?? ""]);
 
   // 与主页同一 queryKey:收藏栏 + 当前代币价格/涨幅
   const { data: tokens } = useQuery({
@@ -290,7 +294,7 @@ export default function TokenPage() {
       style={{
         width: "100%", padding: isMobile ? "8px 8px" : "10px 16px",
         display: "flex", flexDirection: "column", gap: 10,
-        minHeight: "100vh",
+        minHeight: "calc(100vh - 44px)",
         boxSizing: "border-box",
       }}
     >
@@ -301,22 +305,13 @@ export default function TokenPage() {
             SnowOn <span style={{ color: "#f0b90b" }}>Terminal</span>
           </h1>
         </Link>
-        <nav style={{ display: "flex", gap: 14, fontSize: 13, color: "#848e9c" }}>
-          <Link href="/" style={{ color: "#848e9c", textDecoration: "none" }}>发现</Link>
-          <a
-            href="https://www.snowon.fun/create"
-            target="_blank"
-            rel="noreferrer"
-            style={{ color: "#f0b90b", textDecoration: "none", fontWeight: 600 }}
-          >
-            Launch Token
-          </a>
-        </nav>
+        <AppNav current="token" />
         <div style={{ flex: 1, display: "flex", justifyContent: "center", minWidth: isMobile ? "100%" : 0 }}>
           <SearchBox />
         </div>
         {!isMobile && <AiPanel tokenAddress={address} />}
         {!isMobile && <PortfolioPanel />}
+        <LanguageSwitcher />
         <button
           onClick={authenticated ? logout : login}
           style={{
@@ -341,7 +336,7 @@ export default function TokenPage() {
         <TokenLogo src={token.logoUri ?? null} alt={token.symbol ?? ""} size={44} />
         <div style={{ minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 17, fontWeight: 800 }}>{token.name}</span>
+            <span style={{ fontSize: 17, fontWeight: 800 }}>{nameT || token.name}</span>
             <span style={{ fontSize: 13, color: "#848e9c" }}>${token.symbol}</span>
             <button
               onClick={() => toggleFavorite(address)}
@@ -390,7 +385,7 @@ export default function TokenPage() {
           </div>
           <Metric label="池子" value={poolText} hint="流动池报价资产" />
           <Metric label="24h成交额" value={vol24Text} hint="近 24 小时买卖成交额" />
-          <Metric label="总手续费" value={feeUsdText} hint="累计协议+创建者税" />
+          <Metric label="总手续费" value={feeUsdText} hint="累计协议 1% + 估算 Gas，不含创建者税" />
           <Metric label="总供应量" value="1B" hint="曲线恒定总量 10 亿枚" />
           <Metric
             label="总税率"
@@ -406,8 +401,8 @@ export default function TokenPage() {
             </div>
           </div>
         </div>
-        {token.description ? (
-          <p style={{ width: "100%", margin: "4px 0 0", fontSize: 12, color: "#848e9c" }}>{token.description}</p>
+        {(descT || token.description) ? (
+          <p style={{ width: "100%", margin: "4px 0 0", fontSize: 12, color: "#848e9c" }}>{descT || token.description}</p>
         ) : null}
       </section>
 

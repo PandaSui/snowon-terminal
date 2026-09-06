@@ -1,6 +1,7 @@
 "use client";
 
 import type { CSSProperties } from "react";
+import { TwitterPreview } from "./TwitterPreview";
 
 const linkStyle: CSSProperties = {
   fontSize: 12,
@@ -24,13 +25,13 @@ export function SocialLinks({
 }) {
   const items = [
     website && { href: website, label: "Website" },
-    twitter && { href: twitter, label: "X" },
     telegram && { href: telegram, label: "Telegram" },
     github && { href: github, label: "GitHub" },
   ].filter(Boolean) as Array<{ href: string; label: string }>;
-  if (items.length === 0) return null;
+  if (items.length === 0 && !twitter) return null;
   return (
-    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+      {twitter ? <TwitterPreview href={twitter} compact={false} /> : null}
       {items.map((l) => (
         <a key={l.label} href={l.href} target="_blank" rel="noreferrer" style={linkStyle}>
           {l.label}

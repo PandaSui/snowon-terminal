@@ -10,13 +10,16 @@ import { useGlobalChat } from "@/lib/useGlobalChat";
 import { TokenCard, type HomeToken } from "@/components/TokenCard";
 import { PinBar } from "@/components/PinBar";
 import { HomeChat } from "@/components/HomeChat";
-import { BottomBar } from "@/components/BottomBar";
 import { SearchBox } from "@/components/SearchBox";
 import { AiPanel } from "@/components/AiPanel";
 import { PortfolioPanel } from "@/components/PortfolioPanel";
 import { FavoritesBar } from "@/components/FavoritesBar";
+import { AppNav } from "@/components/AppNav";
+import { ColumnFilterButton, EMPTY_FILTER, applyFilters, type ColumnFilter } from "@/components/ColumnFilters";
 import { useIsMobile } from "@/lib/useIsMobile";
 import { useAdmins } from "@/lib/useAdmins";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { t, useLocale } from "@/lib/locale";
 
 const CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? 4663);
 
@@ -29,22 +32,29 @@ async function fetchTokens(): Promise<HomeToken[]> {
   return body;
 }
 
-/** 栏目容器:标题 + 计数 + 独立滚动列表 */
-function Column({ title, dot, tokens, empty }: { title: string; dot: string; tokens: HomeToken[]; empty: string }) {
+/** 栏目容器:标题 + 计数 + 独立筛选 + 滚动列表 */
+function Column({
+  title, dot, tokens, empty, ethUsd, showMultiplier,
+}: {
+  title: string; dot: string; tokens: HomeToken[]; empty: string; ethUsd?: number; showMultiplier?: boolean;
+}) {
+  const [filters, setFilters] = useState<ColumnFilter>(EMPTY_FILTER);
+  const shown = applyFilters(tokens, filters, ethUsd);
   return (
     <section style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, border: "1px solid #1e2329", borderRadius: 10, background: "#0d1117", overflow: "hidden" }}>
       <header style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", borderBottom: "1px solid #1e2329", flexShrink: 0 }}>
         <span style={{ width: 8, height: 8, borderRadius: 4, background: dot }} />
         <span style={{ fontWeight: 700, fontSize: 13 }}>{title}</span>
         <span style={{ marginLeft: "auto", fontSize: 11, color: "#5e6673", background: "#1e2329", borderRadius: 8, padding: "1px 8px" }}>
-          {tokens.length}
+          {shown.length}
         </span>
+        <ColumnFilterButton value={filters} onChange={setFilters} />
       </header>
       <div className="col-scroll" style={{ flex: 1, overflowY: "auto", padding: "8px 10px", minHeight: 0 }}>
-        {tokens.length === 0 ? (
+        {shown.length === 0 ? (
           <div style={{ color: "#5e6673", fontSize: 12, textAlign: "center", marginTop: 24 }}>{empty}</div>
         ) : (
-          tokens.map((t) => <TokenCard key={t.address} t={t} />)
+          shown.map((t) => <TokenCard key={t.address} t={t} showMultiplier={showMultiplier} />)
         )}
       </div>
     </section>
@@ -52,12 +62,21 @@ function Column({ title, dot, tokens, empty }: { title: string; dot: string; tok
 }
 
 export default function DiscoverPage() {
+  const [locale] = useLocale();
   const { login, logout, authenticated, user } = usePrivy();
   const { data: tokens } = useQuery({
     queryKey: ["tokens"],
     queryFn: fetchTokens,
     refetchInterval: 8_000,
     staleTime: 4_000,
+  });
+  const { data: eth } = useQuery({
+    queryKey: ["eth-price"],
+    queryFn: async () => {
+      const res = await fetch(apiUrl("/api/eth-price"));
+      return readJson<{ price: number }>(res);
+    },
+    staleTime: 15_000,
   });
   const chat = useGlobalChat(CHAIN_ID);
   const isMobile = useIsMobile();
@@ -87,17 +106,17 @@ export default function DiscoverPage() {
   }, [tokens]);
 
   const columns = [
-    { key: "movers" as const, title: "🔥 异动代币", short: "🔥 异动", dot: "#f6465d", tokens: lists.movers, empty: "暂无异动(以毕业代币市值飙升排序)" },
-    { key: "fresh" as const, title: "✨ 新创建", short: "✨ 新币", dot: "#f0b90b", tokens: lists.fresh, empty: "暂无新创建代币" },
-    { key: "almost" as const, title: "⏳ 即将毕业", short: "⏳ 将毕业", dot: "#0ecb81", tokens: lists.almost, empty: "暂无接近毕业的代币" },
-    { key: "graduated" as const, title: "🎓 毕业代币", short: "🎓 毕业", dot: "#00c3ff", tokens: lists.graduated, empty: "暂无毕业代币" },
+    { key: "movers" as const, title: t(locale, "movers"), short: t(locale, "movers"), dot: "#f6465d", tokens: lists.movers, empty: "—" },
+    { key: "fresh" as const, title: t(locale, "fresh"), short: t(locale, "fresh"), dot: "#f0b90b", tokens: lists.fresh, empty: "—" },
+    { key: "almost" as const, title: t(locale, "almost"), short: t(locale, "almost"), dot: "#0ecb81", tokens: lists.almost, empty: "—" },
+    { key: "graduated" as const, title: t(locale, "graduated"), short: t(locale, "graduated"), dot: "#00c3ff", tokens: lists.graduated, empty: "—" },
   ];
 
   const chatSection = (
     <section style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, border: "1px solid #1e2329", borderRadius: 10, background: "#0d1117", overflow: "hidden" }}>
       <header style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", borderBottom: "1px solid #1e2329", flexShrink: 0 }}>
         <span style={{ width: 8, height: 8, borderRadius: 4, background: "#b15bff" }} />
-        <span style={{ fontWeight: 700, fontSize: 13 }}>💬 公共聊天室</span>
+        <span style={{ fontWeight: 700, fontSize: 13 }}>{t(locale, "chat")}</span>
         <span style={{ marginLeft: "auto", fontSize: 11, color: "#5e6673", background: "#1e2329", borderRadius: 8, padding: "1px 8px" }}>
           {chat.messages.length}
         </span>
@@ -118,37 +137,28 @@ export default function DiscoverPage() {
   );
 
   return (
-    <main style={{ height: "100vh", display: "flex", flexDirection: "column", padding: isMobile ? "8px 8px" : "10px 14px", gap: 8, boxSizing: "border-box" }}>
+    <main style={{ height: "calc(100vh - 44px)", display: "flex", flexDirection: "column", padding: isMobile ? "8px 8px" : "10px 14px", gap: 8, boxSizing: "border-box" }}>
       {/* 顶部栏:logo + 导航 + 搜索 + AI + 资产 + 钱包 */}
       <header className="site-header" style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
         <h1 style={{ fontSize: isMobile ? 15 : 18, margin: 0, fontWeight: 800, whiteSpace: "nowrap" }}>
           SnowOn <span style={{ color: "#f0b90b" }}>Terminal</span>
         </h1>
-        <nav className="desktop-only" style={{ display: "flex", gap: 14, fontSize: 13, color: "#848e9c" }}>
-          <span style={{ color: "#eaecef", fontWeight: 600 }}>发现</span>
-          <a
-            href="https://www.snowon.fun/create"
-            target="_blank"
-            rel="noreferrer"
-            style={{ color: "#f0b90b", textDecoration: "none", fontWeight: 600 }}
-          >
-            Launch Token
-          </a>
-          {isAdmin && (
-            <Link href="/admin" style={{ color: "#848e9c", textDecoration: "none" }}>管理</Link>
-          )}
-        </nav>
+        <AppNav current="discover" />
+        {isAdmin && (
+          <Link href="/admin" className="desktop-only" style={{ color: "#848e9c", textDecoration: "none", fontSize: 13 }}>管理</Link>
+        )}
         <div className="search-wrap" style={{ flex: 1, display: "flex", justifyContent: "center" }}>
           <SearchBox />
         </div>
         <AiPanel />
         <PortfolioPanel />
+        <LanguageSwitcher />
         <div className="desktop-only" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#5e6673" }}>
           <span style={{ width: 6, height: 6, borderRadius: 3, background: chat.connected ? "#0ecb81" : "#f6465d" }} />
-          {chat.connected ? "已连接" : "未连接"}
+          {chat.connected ? t(locale, "connected") : t(locale, "disconnected")}
         </div>
         <button onClick={authenticated ? logout : login} style={btnStyle}>
-          {authenticated ? `${user?.wallet?.address?.slice(0, 6) ?? user?.email ?? ""}…` : "钱包链接"}
+          {authenticated ? `${user?.wallet?.address?.slice(0, 6) ?? user?.email ?? ""}…` : t(locale, "wallet")}
         </button>
       </header>
 
@@ -163,7 +173,7 @@ export default function DiscoverPage() {
               ? chatSection
               : (() => {
                   const col = columns.find((c) => c.key === tab)!;
-                  return <Column title={col.title} dot={col.dot} tokens={col.tokens} empty={col.empty} />;
+                  return <Column title={col.title} dot={col.dot} tokens={col.tokens} empty={col.empty} ethUsd={eth?.price} showMultiplier={col.key === "movers"} />;
                 })()}
           </div>
           <nav
@@ -194,14 +204,12 @@ export default function DiscoverPage() {
           }}
         >
           {columns.map((c) => (
-            <Column key={c.key} title={c.title} dot={c.dot} tokens={c.tokens} empty={c.empty} />
+            <Column key={c.key} title={c.title} dot={c.dot} tokens={c.tokens} empty={c.empty} ethUsd={eth?.price} showMultiplier={c.key === "movers"} />
           ))}
           {chatSection}
         </div>
       )}
 
-      {/* 最底部栏:钱包追踪弹窗 + ETH 实时价格 */}
-      <BottomBar />
     </main>
   );
 }

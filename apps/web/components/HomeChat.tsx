@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { usePrivy } from "@privy-io/react-auth";
 import type { ChatMsg, Pin } from "@/lib/useGlobalChat";
+import { EmojiPicker } from "./EmojiPicker";
 
 interface Props {
   messages: ChatMsg[];
@@ -95,8 +96,8 @@ export function HomeChat({ messages, pins, connected, lastError, onSend, onPin }
         </button>
       </div>
 
-      {/* 输入 + 发送 */}
-      <div style={{ display: "flex", borderTop: "1px solid #1e2329" }}>
+      {/* 输入 + 表情 + 发送 */}
+      <div style={{ display: "flex", alignItems: "stretch", borderTop: "1px solid #1e2329" }}>
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -107,6 +108,7 @@ export function HomeChat({ messages, pins, connected, lastError, onSend, onPin }
             background: "transparent", border: 0, color: "#fff", outline: "none",
           }}
         />
+        <EmojiPicker onPick={(e) => setInput((v) => v + e)} />
         <button
           onClick={authenticated ? send : login}
           style={{

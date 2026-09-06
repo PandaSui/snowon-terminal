@@ -7,6 +7,11 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { usePrivy } from "@privy-io/react-auth";
 import { useQuery } from "@tanstack/react-query";
 import { readJson } from "@/lib/http";
+import { AppNav } from "@/components/AppNav";
+import { LastActiveTokens, PositionPnlLists } from "@/components/PositionPnlLists";
+import { QuoteUnitToggle } from "@/components/QuoteUnitToggle";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { fmtPnl, useQuoteUnit } from "@/lib/quoteUnit";
 
 /* ────────────────────────── 类型 ────────────────────────── */
 
@@ -38,14 +43,6 @@ const inputStyle: React.CSSProperties = {
   padding: "7px 10px", fontSize: 13, background: "#0b0e11",
   border: `1px solid #2b3139`, borderRadius: 6, color: "#eaecef", outline: "none",
 };
-
-function fmtEth(v: string | number, digits = 5): string {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return "0";
-  const abs = Math.abs(n);
-  const s = abs >= 1 ? n.toFixed(4) : n.toFixed(digits);
-  return n > 0 ? `+${s}` : s;
-}
 
 function shortAddr(a: string) {
   return `${a.slice(0, 6)}…${a.slice(-4)}`;
@@ -194,6 +191,16 @@ function StatCard({ label, value, sub, color }: { label: string; value: string; 
 /* ────────────────────────── PNL 日历 ────────────────────────── */
 
 function PnlCalendar({ pnl }: { pnl: PnlData }) {
+  const [unit] = useQuoteUnit();
+  const { data: eth } = useQuery({
+    queryKey: ["eth-price"],
+    queryFn: async () => {
+      const res = await fetch(apiUrl("/api/eth-price"));
+      return readJson<{ price: number }>(res);
+    },
+    staleTime: 15_000,
+  });
+  const ethUsd = eth?.price;
   const pnlByDay = useMemo(() => {
     const m = new Map<string, number>();
     for (const d of pnl.daily) m.set(d.date, Number(d.pnl));
@@ -227,22 +234,23 @@ function PnlCalendar({ pnl }: { pnl: PnlData }) {
   for (let d = 1; d <= daysInMonth; d++) cells.push(d);
 
   return (
-    <section style={{ background: PANEL, border: `1px solid ${BORDER}`, borderRadius: 10, padding: "14px 16px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-        <span style={{ fontSize: 13, fontWeight: 700 }}>📅 每日盈亏(已实现)</span>
-        <span style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
+    <section style={{ background: PANEL, border: `1px solid ${BORDER}`, borderRadius: 8, padding: "8px 10px", minWidth: 0, display: "flex", flexDirection: "column" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+        <span style={{ fontSize: 11, fontWeight: 700 }}>📅 盈亏日历</span>
+        <span style={{ marginLeft: "auto", display: "flex", gap: 4, alignItems: "center" }}>
+          <QuoteUnitToggle size={13} />
           <button onClick={() => shift(-1)} style={navBtn}>‹</button>
-          <span style={{ fontSize: 12, color: DIM, minWidth: 76, textAlign: "center" }}>
-            {year} 年 {month + 1} 月
+          <span style={{ fontSize: 10, color: DIM, minWidth: 64, textAlign: "center" }}>
+            {year}.{month + 1}
           </span>
           <button onClick={() => shift(1)} style={navBtn}>›</button>
         </span>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, fontSize: 10, color: DIM, textAlign: "center", marginBottom: 4 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2, fontSize: 9, color: DIM, textAlign: "center", marginBottom: 3 }}>
         {["一", "二", "三", "四", "五", "六", "日"].map((d) => <span key={d}>{d}</span>)}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2 }}>
         {cells.map((d, i) => {
           if (d === null) return <div key={`x${i}`} />;
           const key = `${monthKey}-${String(d).padStart(2, "0")}`;
@@ -252,18 +260,18 @@ function PnlCalendar({ pnl }: { pnl: PnlData }) {
           return (
             <div
               key={key}
-              title={has ? `${key}: ${fmtEth(v)} ETH` : key}
+              title={has ? `${key}: ${fmtPnl(v, unit, ethUsd)}` : key}
               style={{
                 border: `1px solid ${has ? (v > 0 ? "rgba(14,203,129,0.35)" : "rgba(246,70,93,0.35)") : BORDER}`,
                 background: has ? (v > 0 ? "rgba(14,203,129,0.08)" : "rgba(246,70,93,0.08)") : "transparent",
-                borderRadius: 6, padding: "5px 4px", minHeight: 40,
-                display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
+                borderRadius: 3, padding: "2px 1px", minHeight: 26,
+                display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 0,
               }}
             >
-              <span style={{ fontSize: 10, color: DIM }}>{d}</span>
+              <span style={{ fontSize: 8, color: DIM, lineHeight: 1.1 }}>{d}</span>
               {has && (
-                <span style={{ fontSize: 10, fontWeight: 700, color, fontVariantNumeric: "tabular-nums" }}>
-                  {fmtEth(v, 4)}
+                <span style={{ fontSize: 8, fontWeight: 700, color, fontVariantNumeric: "tabular-nums", lineHeight: 1.15 }}>
+                  {fmtPnl(v, unit, ethUsd).replace(" ETH", "")}
                 </span>
               )}
             </div>
@@ -271,46 +279,39 @@ function PnlCalendar({ pnl }: { pnl: PnlData }) {
         })}
       </div>
 
-      {/* 月度结算 */}
       <div
         style={{
-          marginTop: 10, padding: "8px 10px", borderTop: `1px solid ${BORDER}`,
-          display: "flex", justifyContent: "space-between", fontSize: 12,
+          marginTop: "auto", paddingTop: 6, borderTop: `1px solid ${BORDER}`,
+          display: "flex", justifyContent: "space-between", fontSize: 10,
         }}
       >
-        <span style={{ color: DIM }}>{month + 1} 月结算</span>
+        <span style={{ color: DIM }}>{month + 1}月</span>
         <b style={{ color: monthTotal >= 0 ? OK : BAD, fontVariantNumeric: "tabular-nums" }}>
-          {fmtEth(monthTotal)} ETH
+          {fmtPnl(monthTotal, unit, ethUsd)}
         </b>
       </div>
-      {pnl.monthly.length > 1 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
-          {[...monthly.entries()].sort().reverse().map(([m, v]) => (
-            <span
-              key={m}
-              style={{
-                fontSize: 10, padding: "3px 8px", borderRadius: 10,
-                border: `1px solid ${BORDER}`, color: v >= 0 ? OK : BAD,
-                fontVariantNumeric: "tabular-nums",
-              }}
-            >
-              {m}: {fmtEth(v)}
-            </span>
-          ))}
-        </div>
-      )}
     </section>
   );
 }
 
 const navBtn: React.CSSProperties = {
-  width: 24, height: 24, border: `1px solid #2b3139`, borderRadius: 6,
-  background: "transparent", color: "#848e9c", cursor: "pointer", fontSize: 14, lineHeight: 1,
+  width: 18, height: 18, border: `1px solid #2b3139`, borderRadius: 4,
+  background: "transparent", color: "#848e9c", cursor: "pointer", fontSize: 12, lineHeight: 1,
 };
 
 /* ────────────────────────── 页面 ────────────────────────── */
 
 function ProfilePageInner() {
+  const [unit] = useQuoteUnit();
+  const { data: eth } = useQuery({
+    queryKey: ["eth-price"],
+    queryFn: async () => {
+      const res = await fetch(apiUrl("/api/eth-price"));
+      return readJson<{ price: number }>(res);
+    },
+    staleTime: 15_000,
+  });
+  const ethUsd = eth?.price;
   const { authenticated, login, logout, user } = usePrivy();
   const params = useSearchParams();
   const viewParam = params.get("address")?.toLowerCase() ?? null;
@@ -335,25 +336,16 @@ function ProfilePageInner() {
   const pnlColor = (v: string) => (Number(v) > 0 ? OK : Number(v) < 0 ? BAD : "#eaecef");
 
   return (
-    <main style={{ minHeight: "100vh", padding: "10px 14px", maxWidth: 980, margin: "0 auto" }}>
+    <main style={{ minHeight: "calc(100vh - 44px)", padding: "10px 14px", maxWidth: 1280, margin: "0 auto" }}>
       <header style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
         <Link href="/" style={{ textDecoration: "none", color: "inherit" }}>
           <h1 style={{ fontSize: 18, margin: 0, fontWeight: 800, whiteSpace: "nowrap" }}>
             SnowOn <span style={{ color: GOLD }}>Terminal</span>
           </h1>
         </Link>
-        <nav style={{ display: "flex", gap: 14, fontSize: 13, color: "#848e9c" }}>
-          <a
-            href="https://www.snowon.fun/create"
-            target="_blank"
-            rel="noreferrer"
-            style={{ color: GOLD, textDecoration: "none", fontWeight: 600 }}
-          >
-            Launch Token
-          </a>
-          <span style={{ color: GOLD, fontWeight: 700 }}>个人</span>
-        </nav>
+        <AppNav current="profile" />
         <div style={{ flex: 1 }} />
+        <LanguageSwitcher />
         <button
           onClick={authenticated ? logout : login}
           style={{
@@ -386,6 +378,9 @@ function ProfilePageInner() {
         <div style={{ display: "grid", gap: 12 }}>
           <ProfileCard address={address} readOnly={readOnly} />
 
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
+            <QuoteUnitToggle size={16} />
+          </div>
           <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))" }}>
             <StatCard
               label="胜率(已平仓代币)"
@@ -395,23 +390,35 @@ function ProfilePageInner() {
             />
             <StatCard
               label="7 天 PNL"
-              value={pnl ? `${fmtEth(pnl.pnl.d7)} ETH` : isFetching ? "…" : "-"}
+              value={pnl ? fmtPnl(Number(pnl.pnl.d7), unit, ethUsd) : isFetching ? "…" : "-"}
               color={pnl ? pnlColor(pnl.pnl.d7) : undefined}
             />
             <StatCard
               label="30 天 PNL"
-              value={pnl ? `${fmtEth(pnl.pnl.d30)} ETH` : isFetching ? "…" : "-"}
+              value={pnl ? fmtPnl(Number(pnl.pnl.d30), unit, ethUsd) : isFetching ? "…" : "-"}
               color={pnl ? pnlColor(pnl.pnl.d30) : undefined}
             />
             <StatCard
               label="总 PNL(已实现)"
-              value={pnl ? `${fmtEth(pnl.pnl.total)} ETH` : isFetching ? "…" : "-"}
+              value={pnl ? fmtPnl(Number(pnl.pnl.total), unit, ethUsd) : isFetching ? "…" : "-"}
               sub={pnl ? `共 ${pnl.tradeCount} 笔成交` : undefined}
               color={pnl ? pnlColor(pnl.pnl.total) : undefined}
             />
           </div>
 
-          {pnl && <PnlCalendar pnl={pnl} />}
+          <div
+            className="asset-three"
+            style={{
+              display: "grid",
+              gridTemplateColumns: "minmax(200px, 240px) minmax(0, 1.5fr) minmax(210px, 280px)",
+              gap: 8,
+              alignItems: "stretch",
+            }}
+          >
+            {pnl ? <PnlCalendar pnl={pnl} /> : <div />}
+            <PositionPnlLists address={address} />
+            <LastActiveTokens address={address} />
+          </div>
 
           <div style={{ fontSize: 11, color: DIM }}>
             口径:已实现盈亏(加权平均成本法,仅统计卖出结算),不含未平仓浮动盈亏;日历按 UTC+8 分日,每月最后一天结算。

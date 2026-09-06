@@ -8,6 +8,8 @@ import { useState } from "react";
 import { readJson } from "@/lib/http";
 import { useAdmins } from "@/lib/useAdmins";
 import { useIsMobile } from "@/lib/useIsMobile";
+import { AppNav } from "@/components/AppNav";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 
 /** 与 /api/admin/chains GET 响应对应的行形状(BigInt 已 jsonSafe 成 string) */
 interface AdminChain {
@@ -401,19 +403,9 @@ export default function AdminPage() {
             SnowOn <span style={{ color: "#f0b90b" }}>Terminal</span>
           </h1>
         </Link>
-        <nav style={{ display: "flex", gap: 14, fontSize: 13, color: "#848e9c" }}>
-          <Link href="/" style={{ color: "#848e9c", textDecoration: "none" }}>发现</Link>
-          <a
-            href="https://www.snowon.fun/create"
-            target="_blank"
-            rel="noreferrer"
-            style={{ color: "#f0b90b", textDecoration: "none", fontWeight: 600 }}
-          >
-            Launch Token
-          </a>
-          <span style={{ color: "#f0b90b", fontWeight: 700 }}>管理</span>
-        </nav>
+        <AppNav current="admin" />
         <div style={{ flex: 1 }} />
+        <LanguageSwitcher />
         <button onClick={authenticated ? logout : login} style={btnGold}>
           {authenticated ? `${user?.wallet?.address?.slice(0, 6) ?? user?.email ?? ""}…` : "钱包链接"}
         </button>
