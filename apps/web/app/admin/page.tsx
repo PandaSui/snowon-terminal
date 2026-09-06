@@ -3,6 +3,7 @@
 import { apiUrl } from "@/lib/apiBase";
 import Link from "next/link";
 import { usePrivy } from "@privy-io/react-auth";
+import { useSession } from "@/lib/useSession";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { readJson } from "@/lib/http";
@@ -148,8 +149,7 @@ function ChainForm({
 
 function ChainCard({ chain, isAdmin }: { chain: AdminChain; isAdmin: boolean }) {
   const qc = useQueryClient();
-  const { user } = usePrivy();
-  const wallet = user?.wallet?.address ?? "";
+  const { token } = useSession();
   const [editing, setEditing] = useState(false);
   const oc = chain.onchain;
 
@@ -157,7 +157,7 @@ function ChainCard({ chain, isAdmin }: { chain: AdminChain; isAdmin: boolean }) 
     mutationFn: async (values: Record<string, string>) => {
       const res = await fetch(apiUrl("/api/admin/chains"), {
         method: "PUT",
-        headers: { "content-type": "application/json", "x-admin-wallet": wallet },
+        headers: { "content-type": "application/json", authorization: "Bearer " + token },
         body: JSON.stringify({ ...values, chainId: chain.chainId }),
       });
       const body = await readJson<{ error?: string }>(res);
@@ -261,13 +261,14 @@ function ChainCard({ chain, isAdmin }: { chain: AdminChain; isAdmin: boolean }) 
 function AdminsCard({ wallet, isAdmin }: { wallet: string; isAdmin: boolean }) {
   const qc = useQueryClient();
   const { admins } = useAdmins(wallet);
+  const { token } = useSession();
   const [input, setInput] = useState("");
 
   const add = useMutation({
     mutationFn: async (address: string) => {
       const res = await fetch(apiUrl("/api/admin/admins"), {
         method: "POST",
-        headers: { "content-type": "application/json", "x-admin-wallet": wallet },
+        headers: { "content-type": "application/json", authorization: "Bearer " + token },
         body: JSON.stringify({ address }),
       });
       const body = await readJson<{ error?: string }>(res);
@@ -283,7 +284,7 @@ function AdminsCard({ wallet, isAdmin }: { wallet: string; isAdmin: boolean }) {
     mutationFn: async (address: string) => {
       const res = await fetch(apiUrl(`/api/admin/admins?address=${encodeURIComponent(address)}`), {
         method: "DELETE",
-        headers: { "x-admin-wallet": wallet },
+        headers: { authorization: "Bearer " + token },
       });
       const body = await readJson<{ error?: string }>(res);
       if (!res.ok) throw new Error(body.error ?? `移除失败(${res.status})`);
@@ -357,6 +358,82 @@ function AdminsCard({ wallet, isAdmin }: { wallet: string; isAdmin: boolean }) {
   );
 }
 
+function PinSettingsCard({ wallet, isAdmin }: { wallet: string; isAdmin: boolean }) {
+  const qc = useQueryClient();
+  const { token } = useSession();
+  const { data } = useQuery({
+    queryKey: ["admin-settings"],
+    queryFn: async () => {
+      const res = await fetch(apiUrl("/api/admin/settings"));
+      return (await res.json()) as { pinPriceSnow: string; pinDurationSec: number; pinMax: number; pinPayee: string };
+    },
+  });
+  const [form, setForm] = useState<{ price: string; durMin: string; max: string; payee: string } | null>(null);
+  const f = form ?? {
+    price: data?.pinPriceSnow ?? "100",
+    durMin: String(Math.round((data?.pinDurationSec ?? 3600) / 60)),
+    max: String(data?.pinMax ?? 5),
+    payee: data?.pinPayee ?? "",
+  };
+  const set = (k: keyof typeof f, v: string) => setForm({ ...f, [k]: v });
+  const save = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(apiUrl("/api/admin/settings"), {
+        method: "PUT",
+        headers: { "content-type": "application/json", authorization: "Bearer " + token },
+        body: JSON.stringify({
+          pinPriceSnow: f.price.trim(),
+          pinDurationSec: Math.round(Number(f.durMin) * 60),
+          pinMax: Number(f.max),
+          pinPayee: f.payee.trim(),
+        }),
+      });
+      const body = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(body.error ?? `保存失败(${res.status})`);
+    },
+    onSuccess: () => {
+      setForm(null);
+      qc.invalidateQueries({ queryKey: ["admin-settings"] });
+    },
+  });
+
+  const inp = {
+    padding: "7px 10px", fontSize: 12, background: "#0b0e11", border: "1px solid #2b3139",
+    borderRadius: 6, color: "#fff", outline: "none", width: "100%", marginTop: 4,
+  } as const;
+
+  return (
+    <section style={{ border: "1px solid #1e2329", borderRadius: 10, background: "#0d1117" }}>
+      <header style={{ padding: "12px 14px", borderBottom: "1px solid #1e2329", fontWeight: 700, fontSize: 14 }}>
+        📌 付费叮住设置 <span style={{ fontSize: 11, color: "#5e6673", fontWeight: 400 }}>· 用户付 SNOW 到收款地址,服务端链上验付</span>
+      </header>
+      <div style={{ padding: 14, display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12 }}>
+        <label style={{ fontSize: 12, color: "#848e9c" }}>价格(SNOW / 次)
+          <input style={inp} value={f.price} onChange={(e) => set("price", e.target.value)} disabled={!isAdmin} inputMode="numeric" />
+        </label>
+        <label style={{ fontSize: 12, color: "#848e9c" }}>展示时长(分钟)
+          <input style={inp} value={f.durMin} onChange={(e) => set("durMin", e.target.value)} disabled={!isAdmin} inputMode="numeric" />
+        </label>
+        <label style={{ fontSize: 12, color: "#848e9c" }}>同时最多条数
+          <input style={inp} value={f.max} onChange={(e) => set("max", e.target.value)} disabled={!isAdmin} inputMode="numeric" />
+        </label>
+        <label style={{ fontSize: 12, color: "#848e9c", gridColumn: "1 / -1" }}>SNOW 收款地址
+          <input style={inp} value={f.payee} onChange={(e) => set("payee", e.target.value)} disabled={!isAdmin} placeholder="0x…" />
+        </label>
+      </div>
+      {isAdmin && (
+        <div style={{ padding: "0 14px 14px", display: "flex", gap: 10, alignItems: "center" }}>
+          <button onClick={() => save.mutate()} disabled={save.isPending} style={btnGold}>
+            {save.isPending ? "保存中…" : "保存"}
+          </button>
+          {save.error && <span style={{ color: "#f6465d", fontSize: 12 }}>{(save.error as Error).message}</span>}
+          {save.isSuccess && <span style={{ color: "#0ecb81", fontSize: 12 }}>✓ 已保存</span>}
+        </div>
+      )}
+    </section>
+  );
+}
+
 export default function AdminPage() {
   const { login, logout, authenticated, user } = usePrivy();
   const isMobile = useIsMobile();
@@ -365,6 +442,7 @@ export default function AdminPage() {
   const wallet = user?.wallet?.address?.toLowerCase() ?? "";
 
   const adminQuery = useAdmins(wallet);
+  const { token, signedIn, signIn, signing } = useSession();
   const isAdmin = adminQuery.isAdmin;
 
   const { data, isLoading, isError, error, dataUpdatedAt } = useQuery({
@@ -382,7 +460,7 @@ export default function AdminPage() {
     mutationFn: async (values: Record<string, string>) => {
       const res = await fetch(apiUrl("/api/admin/chains"), {
         method: "POST",
-        headers: { "content-type": "application/json", "x-admin-wallet": wallet },
+        headers: { "content-type": "application/json", authorization: "Bearer " + token },
         body: JSON.stringify(values),
       });
       const body = await readJson<{ error?: string }>(res);
@@ -426,6 +504,17 @@ export default function AdminPage() {
             : "连接管理员钱包后可编辑参数;当前为查看模式。"}
         </div>
       )}
+      {isAdmin && !signedIn && (
+        <div style={{ padding: "8px 12px", border: "1px solid #f0b90b", borderRadius: 8, background: "rgba(240,185,11,0.08)", fontSize: 12, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span style={{ color: "#f0b90b" }}>🔐 修改配置前需用钱包签名登录(仅验证身份,不产生交易、不花 gas)。</span>
+          <button onClick={() => void signIn()} disabled={signing} style={{ ...btnGold, opacity: signing ? 0.6 : 1 }}>
+            {signing ? "签名中…" : "签名登录"}
+          </button>
+        </div>
+      )}
+      {isAdmin && signedIn && (
+        <div style={{ fontSize: 11, color: "#0ecb81" }}>✓ 已签名登录,可编辑并保存</div>
+      )}
       <div style={{ fontSize: 11, color: "#5e6673" }}>
         ⚠ 链上参数(协议分成/毕业阈值等)为合约实时只读;此处编辑的是终端侧链配置(RPC/合约地址/索引起块)。indexer 仍读 env 启动,改配置后需重启 indexer 生效。
       </div>
@@ -434,6 +523,7 @@ export default function AdminPage() {
       {isError && <div style={{ color: "#f6465d", padding: 20 }}>加载失败:{(error as Error).message}</div>}
 
       <AdminsCard wallet={wallet} isAdmin={isAdmin} />
+      <PinSettingsCard wallet={wallet} isAdmin={isAdmin} />
 
       {data?.chains.map((c) => <ChainCard key={c.chainId} chain={c} isAdmin={isAdmin} />)}
       {data && data.chains.length === 0 && (

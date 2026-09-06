@@ -61,6 +61,20 @@
     {
       "idx": 8,
       "version": "7",
+      "when": 1788550000000,
+      "tag": "0008_app_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1788560000000,
+      "tag": "0009_auth_nonces",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
       "when": 1788680000000,
       "tag": "0008_tracked_wallets",
       "breakpoints": true

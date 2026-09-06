@@ -132,6 +132,10 @@ export default function DiscoverPage() {
         lastError={chat.lastError}
         onSend={chat.send}
         onPin={chat.pin}
+        pinning={chat.pinning}
+        signedIn={chat.signedIn}
+        signIn={chat.signIn}
+        signing={chat.signing}
       />
     </section>
   );

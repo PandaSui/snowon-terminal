@@ -310,3 +310,25 @@ export const adminWallets = pgTable("admin_wallets", {
   addedBy: varchar("added_by", { length: 42 }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// ────────────────────────── 全局应用设置 ──────────────────────────
+/** 单行(id=1)全局配置,管理面板可改。目前用于付费叮住的价格/时长/上限/收款地址。 */
+export const appSettings = pgTable("app_settings", {
+  id: smallint("id").primaryKey().default(1),
+  /** 叮住一次的价格(整数 SNOW,如 100) */
+  pinPriceSnow: numeric("pin_price_snow").notNull().default("100"),
+  /** 叮住展示时长(秒),默认 3600=60 分钟 */
+  pinDurationSec: integer("pin_duration_sec").notNull().default(3600),
+  /** 每房间最多同时叮住条数 */
+  pinMax: smallint("pin_max").notNull().default(5),
+  /** SNOW 收款地址(付费叮住打到这里) */
+  pinPayee: varchar("pin_payee", { length: 42 }).notNull().default("0xEC11B5bd5f863b588a66A97C1Eda6c47010Ca751"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// ────────────────────── 登录 nonce(签名鉴权防重放)──────────────────────
+/** 一次性 nonce:签发后写入,登录验签时消费(删除),5 分钟过期。 */
+export const authNonces = pgTable("auth_nonces", {
+  nonce: varchar("nonce", { length: 64 }).primaryKey(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+});

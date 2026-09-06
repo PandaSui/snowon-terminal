@@ -3,7 +3,8 @@ import { eq } from "drizzle-orm";
 import { adminWallets } from "@terminal/db";
 import { db } from "@/lib/db";
 import { apiError } from "@/lib/api";
-import { envAdminWallets, isAdminWallet, listAdminWallets } from "@/lib/admins";
+import { envAdminWallets, listAdminWallets } from "@/lib/admins";
+import { requireAdmin } from "@/lib/auth";
 
 /**
  * 管理员名单管理。
@@ -17,12 +18,11 @@ import { envAdminWallets, isAdminWallet, listAdminWallets } from "@/lib/admins";
 
 const ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
 
-async function checkAdmin(req: NextRequest): Promise<NextResponse | null> {
-  const wallet = (req.headers.get("x-admin-wallet") ?? "").toLowerCase();
-  if (!ADDR_RE.test(wallet) || !(await isAdminWallet(wallet))) {
-    return NextResponse.json({ error: "非管理员钱包,无权管理管理员名单" }, { status: 403 });
-  }
-  return null;
+/** 校验会话令牌 + 管理员;成功返回管理员地址,失败返回 403 响应。 */
+async function checkAdmin(req: NextRequest): Promise<string | NextResponse> {
+  const admin = await requireAdmin(req);
+  if (!admin) return NextResponse.json({ error: "未登录或非管理员,无权管理管理员名单" }, { status: 403 });
+  return admin;
 }
 
 export async function GET() {
@@ -35,8 +35,8 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const deny = await checkAdmin(req);
-  if (deny) return deny;
+  const gate = await checkAdmin(req);
+  if (gate instanceof NextResponse) return gate;
   try {
     const body = (await req.json()) as { address?: string };
     const address = (body.address ?? "").trim().toLowerCase();
@@ -46,10 +46,9 @@ export async function POST(req: NextRequest) {
     if (envAdminWallets().includes(address)) {
       return NextResponse.json({ error: "该地址已是主管理员(env 配置),无需重复添加" }, { status: 409 });
     }
-    const operator = (req.headers.get("x-admin-wallet") ?? "").toLowerCase();
     const [created] = await db
       .insert(adminWallets)
-      .values({ address, addedBy: operator })
+      .values({ address, addedBy: gate })
       .onConflictDoNothing()
       .returning();
     if (!created) return NextResponse.json({ error: "该地址已是管理员" }, { status: 409 });
@@ -60,8 +59,8 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const deny = await checkAdmin(req);
-  if (deny) return deny;
+  const gate = await checkAdmin(req);
+  if (gate instanceof NextResponse) return gate;
   try {
     const address = (req.nextUrl.searchParams.get("address") ?? "").trim().toLowerCase();
     if (!ADDR_RE.test(address)) {
