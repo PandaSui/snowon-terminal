@@ -54,31 +54,44 @@ function buildRules(s: {
   return out;
 }
 
+/**
+ * LLM 风控结论。OpenAI 兼容协议,环境变量可配:
+ *   AI_API_KEY   (必填,缺省静默降级回规则引擎;兼容旧变量 XAI_API_KEY)
+ *   AI_BASE_URL  默认 Moonshot 国际站 https://api.moonshot.ai/v1(国内站 api.moonshot.cn;
+ *                Kimi Code 订阅 Key 用 https://api.kimi.com/coding/v1)
+ *   AI_MODEL     默认 kimi-k2.6(Kimi Code 订阅用 k3)
+ */
 async function llmInsight(payload: unknown, lang: string): Promise<string | null> {
-  const key = process.env.XAI_API_KEY;
+  const key = process.env.AI_API_KEY ?? process.env.XAI_API_KEY;
   if (!key) return null;
+  const base = (process.env.AI_BASE_URL ?? "https://api.moonshot.ai/v1").replace(/\/+$/, "");
+  const model = process.env.AI_MODEL ?? "kimi-k2.6";
   try {
-    const r = await fetch("https://api.x.ai/v1/chat/completions", {
+    const r = await fetch(`${base}/chat/completions`, {
       method: "POST",
       headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
       body: JSON.stringify({
-        model: "grok-4.5",
-        temperature: 0.2,
-        max_tokens: 420,
+        model,
+        // 有的模型(如 k3)只允许 temperature=1,缺省不传交给服务端默认
+        ...(process.env.AI_TEMPERATURE !== undefined
+          ? { temperature: Number(process.env.AI_TEMPERATURE) }
+          : {}),
+        max_tokens: 1200,
         messages: [
           {
             role: "system",
             content:
               lang === "en"
-                ? "You are a risk analyst for a launchpad terminal. Use only the JSON numbers the user gives. Write 3-6 sentences in English. Focus on new wallets, same-funder bundles, phish/mixers, and buy/sell flow. Do not invent missing data. No investment advice."
+                ? "You are snowon-terminal AI, the built-in risk analyst of the SnowOn Terminal launchpad trading terminal. Always identify yourself as snowon-terminal AI; never mention Kimi, Moonshot, or any other model or company name. Use only the JSON numbers the user gives. Write 3-6 sentences in English. Focus on new wallets, same-funder bundles, phish/mixers, and buy/sell flow. Do not invent missing data. No investment advice."
                 : lang === "ko"
-                  ? "당신은 런치패드 단말기의 리스크 분석가입니다. 사용자가 준 JSON 숫자만 사용하세요. 한국어로 3-6문장. 신규 지갑, 동일 자금원 번들, 피싱/믹서, 매수/매도 흐름에 집중. 없는 데이터를 만들지 마세요. 투자 조언 금지."
-                  : "你是发射盘交易终端的风控分析助手。只用用户给出的 JSON 数字做中文结论，3-6 句。重点：新钱包、同资金来源捆绑、钓鱼/混币、买卖盘。不要编造未提供的数据，不要投资建议口吻。",
+                  ? "당신은 SnowOn Terminal 런치패드 거래 단말기의 내장 리스크 분석가 snowon-terminal AI입니다. 항상 snowon-terminal AI라고만 밝히고, Kimi·Moonshot 등 다른 모델/회사 이름은 절대 언급하지 마세요. 사용자가 준 JSON 숫자만 사용하세요. 한국어로 3-6문장. 신규 지갑, 동일 자금원 번들, 피싱/믹서, 매수/매도 흐름에 집중. 없는 데이터를 만들지 마세요. 투자 조언 금지."
+                  : "你是 snowon-terminal AI，SnowOn Terminal 发射盘交易终端的内置风控分析助手。任何时候只能自称 snowon-terminal AI，绝不提及 Kimi、Moonshot 或其他模型/公司名。只用用户给出的 JSON 数字做中文结论，3-6 句。重点：新钱包、同资金来源捆绑、钓鱼/混币、买卖盘。不要编造未提供的数据，不要投资建议口吻。",
           },
           { role: "user", content: JSON.stringify(payload) },
         ],
       }),
-      signal: AbortSignal.timeout(12_000),
+      // k3 带推理,真实负载下约 15-25s 返回,超时要留够
+      signal: AbortSignal.timeout(30_000),
     });
     if (!r.ok) return null;
     const j = (await r.json()) as { choices?: Array<{ message?: { content?: string } }> };
@@ -89,7 +102,7 @@ async function llmInsight(payload: unknown, lang: string): Promise<string | null
   }
 }
 
-/** 从 trades/wallets/positions 汇总，供面板与 AI 分析。配 XAI_API_KEY 时再让模型写一段结论。 */
+/** 从 trades/wallets/positions 汇总，供面板与 AI 分析。配 AI_API_KEY 时再让模型写一段结论。 */
 export async function GET(req: Request, { params }: { params: Promise<{ address: string }> }) {
   try {
     const { address } = await params;
@@ -174,7 +187,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ address:
       ...stats,
       rules,
       llm,
-      llmEnabled: Boolean(process.env.XAI_API_KEY),
+      llmEnabled: Boolean(process.env.AI_API_KEY ?? process.env.XAI_API_KEY),
     });
   } catch (e) {
     return apiError(e);
