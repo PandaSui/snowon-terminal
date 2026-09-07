@@ -5,6 +5,7 @@ import { usePrivy } from "@privy-io/react-auth";
 import { EmojiPicker } from "./EmojiPicker";
 import { EmojiAvatar } from "./EmojiAvatar";
 import { useT } from "@/lib/locale";
+import { useSession } from "@/lib/useSession";
 
 interface ChatMsg {
   id: string;
@@ -18,13 +19,16 @@ interface ChatMsg {
 /**
  * 代币聊天室。emoji 直接输入(UTF-8);表情面板前端用 emoji-mart 增强。
  * 持仓徽章:用户名旁的百分比,来自消息发送时的快照。
+ * 鉴权:签名登录会话令牌(useSession),服务端 verifySession 得到可信钱包地址。
  */
 export function ChatBox({ chainId, tokenAddress }: { chainId: number; tokenAddress: string }) {
   const tr = useT();
-  const { authenticated, user, login, getAccessToken } = usePrivy();
+  const { authenticated, login } = usePrivy();
+  const session = useSession();
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState("");
   const [dmkInput, setDmkInput] = useState("");
+  const [lastError, setLastError] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const room = `${chainId}:${tokenAddress.toLowerCase()}`;
 
@@ -34,17 +38,8 @@ export function ChatBox({ chainId, tokenAddress }: { chainId: number; tokenAddre
     const ws = new WebSocket(url);
     wsRef.current = ws;
     ws.onopen = () => {
-      // 服务端启用 PRIVY_APP_SECRET 时校验 token;开发模式回退到 userId
-      void (async () => {
-        const token = authenticated ? await getAccessToken().catch(() => null) : null;
-        ws.send(JSON.stringify({
-          t: "auth",
-          token,
-          userId: user?.id ?? `anon:${Math.random().toString(36).slice(2)}`,
-          wallet: user?.wallet?.address,
-        }));
-        ws.send(JSON.stringify({ t: "join", room }));
-      })();
+      ws.send(JSON.stringify({ t: "auth", token: session.token }));
+      ws.send(JSON.stringify({ t: "join", room }));
     };
     ws.onmessage = (e) => {
       const data = JSON.parse(e.data);
@@ -59,9 +54,23 @@ export function ChatBox({ chainId, tokenAddress }: { chainId: number; tokenAddre
       }
       if (data.t === "msg") setMessages((prev) => [...prev.slice(-199), { ...data, id: String(data.id), username: data.username ?? "anon" }]);
       if (data.t === "delete") setMessages((prev) => prev.filter((m) => m.id !== data.id));
+      if (data.t === "error") {
+        setLastError(data.message ?? "error");
+        setTimeout(() => setLastError(null), 4000);
+      }
     };
     return () => ws.close();
-  }, [room, user?.id]);
+  }, [room, session.token]);
+
+  /** 发送门槛:未连钱包→Privy 登录;已连未签名→签名登录换会话令牌 */
+  function ensureAuth(action: () => void) {
+    if (!authenticated) return login();
+    if (!session.signedIn) {
+      void session.signIn();
+      return;
+    }
+    action();
+  }
 
   function send() {
     if (!input.trim() || !wsRef.current) return;
@@ -74,17 +83,23 @@ export function ChatBox({ chainId, tokenAddress }: { chainId: number; tokenAddre
     setInput("");
   }
 
-  /** 付费弹幕:5U/条,炫彩字体飘到 K 线图(支付验证待合约,见服务端 DANMAKU_REQUIRE_PAYMENT) */
+  /** 弹幕:买入 ≥$5 该代币即可发(服务端按累计买入 ETH×现价校验),炫彩字体飘到 K 线图 */
   function sendDanmaku() {
     if (!dmkInput.trim() || !wsRef.current) return;
     wsRef.current.send(JSON.stringify({
       t: "danmaku",
       room,
       content: dmkInput,
-      wallet: user?.wallet?.address,
+      wallet: session.address ?? undefined,
     }));
     setDmkInput("");
   }
+
+  const hint = !authenticated
+    ? { chat: tr("chatLogin"), dmk: tr("danmakuLogin") }
+    : !session.signedIn
+      ? { chat: tr("chatSignIn"), dmk: tr("danmakuSignIn") }
+      : { chat: tr("saySomething"), dmk: tr("danmakuPh") };
 
   return (
     <div style={{ border: "1px solid #1e2329", borderRadius: 10, background: "#0d1117", display: "flex", flexDirection: "column", height: "100%", minHeight: 0, minWidth: 0, overflow: "hidden", boxSizing: "border-box" }}>
@@ -104,14 +119,19 @@ export function ChatBox({ chainId, tokenAddress }: { chainId: number; tokenAddre
           </div>
         ))}
       </div>
+      {(lastError || session.error) && (
+        <div style={{ padding: "4px 10px", fontSize: 11, color: "#f6465d", borderTop: "1px solid #1e2329" }}>
+          {lastError ?? session.error}
+        </div>
+      )}
       {/* 付费弹幕行:消息输入的上一栏 */}
       <div style={{ display: "flex", gap: 6, padding: "6px 8px", borderTop: "1px solid #1e2329", background: "#10141b", minWidth: 0 }}>
         <input
           value={dmkInput}
           onChange={(e) => setDmkInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && (authenticated ? sendDanmaku() : login())}
+          onKeyDown={(e) => e.key === "Enter" && ensureAuth(sendDanmaku)}
           maxLength={60}
-          placeholder={authenticated ? tr("danmakuPh") : tr("danmakuLogin")}
+          placeholder={hint.dmk}
           style={{
             flex: 1, minWidth: 0, padding: "7px 8px", fontSize: 12,
             background: "#0b0e11", border: "1px solid #2b3139", borderRadius: 6,
@@ -119,7 +139,7 @@ export function ChatBox({ chainId, tokenAddress }: { chainId: number; tokenAddre
           }}
         />
         <button
-          onClick={authenticated ? sendDanmaku : login}
+          onClick={() => ensureAuth(sendDanmaku)}
           title={tr("danmakuTip")}
           style={{
             flexShrink: 0, padding: "0 8px", border: 0, borderRadius: 6, cursor: "pointer",
@@ -134,8 +154,8 @@ export function ChatBox({ chainId, tokenAddress }: { chainId: number; tokenAddre
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && (authenticated ? send() : login())}
-          placeholder={authenticated ? tr("saySomething") : tr("chatLogin")}
+          onKeyDown={(e) => e.key === "Enter" && ensureAuth(send)}
+          placeholder={hint.chat}
           style={{
             flex: 1, minWidth: 0, padding: "10px 8px", background: "transparent",
             border: 0, color: "#fff", outline: "none", fontSize: 12,
@@ -143,7 +163,7 @@ export function ChatBox({ chainId, tokenAddress }: { chainId: number; tokenAddre
         />
         <EmojiPicker onPick={(e) => setInput((v) => v + e)} />
         <button
-          onClick={authenticated ? send : login}
+          onClick={() => ensureAuth(send)}
           style={{
             flexShrink: 0, padding: "0 12px", border: 0, background: "#f0b90b",
             fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap", fontSize: 12,

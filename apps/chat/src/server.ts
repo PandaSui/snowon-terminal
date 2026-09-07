@@ -5,6 +5,7 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { createDb } from "@terminal/db";
 import { chatMessages, chatUsers, getAppSettings, verifySession, type AppSettings } from "@terminal/db";
 import { verifySnowPayment, snowToWei } from "./pay.js";
+import { ethPriceUsd } from "./price.js";
 import { holdingShareBps, totalBoughtEth } from "./holdings.js";
 
 // 鉴权:客户端签名登录换取会话令牌,连接时带来,服务端 verifySession 得到可信钱包地址。
@@ -264,22 +265,18 @@ async function handleMessage(ctx: ClientCtx, raw: string) {
     return;
   }
 
-  // 付费弹幕:5U/次,炫彩字体飘过 K 线图。不落库、不持久化,即播即弃。
-  // DANMAKU_REQUIRE_PAYMENT=1 时要求带 payTxHash(链上验付 TODO);默认 dev 模式直通。
+  // 弹幕:不收费,但要求该地址累计买入 ≥ $5 的该代币(DANMAKU_MIN_BUY_USD 可调,0=关闭门槛)。
+  // 不落库、不持久化,即播即弃。
   if (msg.t === "danmaku" && msg.room && msg.content) {
     if (!ctx.userId) return ctx.ws.send(JSON.stringify({ t: "error", message: "auth required" }));
     const content = msg.content.slice(0, 60);
     if (!content.trim()) return;
-    if (process.env.DANMAKU_REQUIRE_PAYMENT === "1" && !msg.payTxHash) {
-      return ctx.ws.send(JSON.stringify({ t: "error", message: "danmaku payment required (5U)" }));
-    }
     // 限流:每用户 3s 一条弹幕
     const now = Date.now();
     const key = `dmk:${ctx.userId}`;
     if (now - (lastSent.get(key) ?? 0) < 3000) {
       return ctx.ws.send(JSON.stringify({ t: "error", message: "danmaku rate limited (3s)" }));
     }
-    lastSent.set(key, now);
     const user = await db.select().from(chatUsers).where(eq(chatUsers.id, ctx.userId)).limit(1);
     const [chainIdStr, token] = msg.room.split(":");
     const chainId = Number(chainIdStr);
@@ -291,6 +288,19 @@ async function handleMessage(ctx: ClientCtx, raw: string) {
     if (wallet && token && token !== "global" && Number.isFinite(chainId)) {
       buyEth = await totalBoughtEth(db, chainId, wallet, token).catch(() => 0);
     }
+    // 购买门槛:代币房间才检查;全球房间无标的不查
+    const minUsd = Number(process.env.DANMAKU_MIN_BUY_USD ?? 5);
+    if (token && token !== "global" && minUsd > 0) {
+      const ethUsd = await ethPriceUsd();
+      // 价格源故障时 fail-open;正常时累计买入折美元不足 $5 拒发
+      if (ethUsd != null && buyEth * ethUsd < minUsd) {
+        return ctx.ws.send(JSON.stringify({
+          t: "error",
+          message: `买入 ≥$${minUsd} 该代币后才能发弹幕(当前 $${(buyEth * ethUsd).toFixed(2)})`,
+        }));
+      }
+    }
+    lastSent.set(key, now);
     emit(msg.room, {
       t: "danmaku",
       room: msg.room,
