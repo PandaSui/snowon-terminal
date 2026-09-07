@@ -207,14 +207,13 @@ function fmtMult(x: number): string {
   return `x${x >= 10 ? x.toFixed(0) : x.toFixed(1)}`.replace(/\.0$/, "");
 }
 
-/** 主页代币小卡片:火花线背景 + Top10/捆绑/钓鱼警告色 + 美元市值 + 社交 logo + hover 预读 */
+/** 主页代币小卡片:火花线背景 + Top10/捆绑/钓鱼警告色 + 美元市值 + 社交 logo;介绍固定 2 行省略号,hover 不改变布局 */
 function TokenCardInner({ t, showMultiplier }: { t: HomeToken; showMultiplier?: boolean }) {
   const [locale] = useLocale();
   const change = fmtChange(t.change24hPct);
   const xMult = showMultiplier ? multValue(t.change24hPct) : null;
   const progress = t.graduated ? null : Math.min(1, Math.max(0, Number(t.graduationProgress ?? 0)));
   const [fav, setFav] = useState(false);
-  const [hover, setHover] = useState(false);
   const [extra, setExtra] = useState<Partial<HomeToken>>({});
   const qc = useQueryClient();
   const { data: eth } = useQuery({ queryKey: ["eth-price"], queryFn: fetchEthPrice, staleTime: 15_000 });
@@ -249,7 +248,7 @@ function TokenCardInner({ t, showMultiplier }: { t: HomeToken; showMultiplier?: 
       <div
         className="token-card"
         onMouseEnter={() => {
-          setHover(true);
+          // hover 时补拉链下元数据(介绍/社交);介绍区域高度已固定,填充不会顶动卡片
           const hasMeta = t.description != null || t.website != null || t.twitter != null || t.telegram != null;
           if (hasMeta) return;
           void qc
@@ -262,7 +261,6 @@ function TokenCardInner({ t, showMultiplier }: { t: HomeToken; showMultiplier?: 
               if (d) setExtra(d);
             });
         }}
-        onMouseLeave={() => setHover(false)}
         style={{
           position: "relative",
           border: "1px solid #1e2329",
@@ -387,20 +385,21 @@ function TokenCardInner({ t, showMultiplier }: { t: HomeToken; showMultiplier?: 
             </div>
           )}
 
-          {hover && (description || skill) && (
-            <div
-              style={{
-                marginTop: 8, paddingTop: 8, borderTop: "1px solid #1e2329",
-                fontSize: 11, color: "#b7bcc5", lineHeight: 1.5,
-                display: "-webkit-box", WebkitLineClamp: 4, WebkitBoxOrient: "vertical", overflow: "hidden",
-              }}
-            >
-              {skill && (
-                <span style={{ color: "#5e8bff", fontWeight: 700, marginRight: 6 }}>{skill}</span>
-              )}
-              {descT || description}
-            </div>
-          )}
+          {/* 介绍区:固定 2 行高度,超长省略号;hover 看全文用原生 tooltip。始终渲染保证卡片高度一致、不跳动;无内容时边框透明但占位相同 */}
+          <div
+            title={(description ?? "") || undefined}
+            style={{
+              marginTop: 8, paddingTop: 8,
+              borderTop: `1px solid ${description || skill ? "#1e2329" : "transparent"}`,
+              fontSize: 11, color: "#b7bcc5", lineHeight: 1.5, height: 33,
+              display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden",
+            }}
+          >
+            {skill && (
+              <span style={{ color: "#5e8bff", fontWeight: 700, marginRight: 6 }}>{skill}</span>
+            )}
+            {descT || description || ""}
+          </div>
         </div>
       </div>
     </Link>

@@ -20,6 +20,8 @@ interface Position {
 
 const CARD_W = 720;
 const CARD_H = 420;
+/** 自定义分享背景在 localStorage 的键(dataURL,持久保存) */
+const BG_KEY = "snowon:share-bg";
 
 function shortAddr(a: string) {
   return `${a.slice(0, 6)}…${a.slice(-4)}`;
@@ -42,6 +44,25 @@ function loadImage(src: string): Promise<HTMLImageElement> {
     img.onerror = reject;
     img.src = src;
   });
+}
+
+/** 上传图 → 压缩(最长边 1600px,JPEG 0.85)→ dataURL。压完才能放进 localStorage 长期保存。 */
+async function fileToDataUrl(file: File): Promise<string> {
+  const objUrl = URL.createObjectURL(file);
+  try {
+    const img = await loadImage(objUrl);
+    const MAX = 1600;
+    const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+    const c = document.createElement("canvas");
+    c.width = Math.max(1, Math.round(img.width * scale));
+    c.height = Math.max(1, Math.round(img.height * scale));
+    const cx = c.getContext("2d");
+    if (!cx) throw new Error("canvas");
+    cx.drawImage(img, 0, 0, c.width, c.height);
+    return c.toDataURL("image/jpeg", 0.85);
+  } finally {
+    URL.revokeObjectURL(objUrl);
+  }
 }
 
 async function drawCard(opts: {
@@ -92,6 +113,15 @@ async function drawCard(opts: {
   ctx.fillStyle = "#f0b90b";
   ctx.font = "800 22px system-ui, sans-serif";
   ctx.fillText("SnowOn Terminal", 36, 48);
+
+  // 右上角网址:snowon 品牌黄高亮 + .fun 白色
+  ctx.font = "800 18px system-ui, sans-serif";
+  const wA = ctx.measureText("snowon").width;
+  const wB = ctx.measureText(".fun").width;
+  ctx.fillStyle = "#f0b90b";
+  ctx.fillText("snowon", CARD_W - 36 - wA - wB, 48);
+  ctx.fillStyle = "#eaecef";
+  ctx.fillText(".fun", CARD_W - 36 - wB, 48);
 
   ctx.fillStyle = "#eaecef";
   ctx.font = "800 42px system-ui, sans-serif";
@@ -241,15 +271,40 @@ export function PnlShareCard({ tokenAddress, symbol }: { tokenAddress: string; s
     positive,
   };
 
-  useEffect(() => () => { if (bgUrl) URL.revokeObjectURL(bgUrl); }, [bgUrl]);
+  useEffect(() => () => {
+    // dataURL 不用释放;blob: 才需要
+    setBgUrl((prev) => {
+      if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev);
+      return prev;
+    });
+  }, []);
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
+
+  // 挂载时读回上次上传的背景(持久化)
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(BG_KEY);
+      if (saved) setBgUrl(saved);
+    } catch {
+      /* localStorage 不可用 */
+    }
+  }, []);
 
   const setBgFile = useCallback((file: File | undefined | null) => {
     if (!file || !file.type.startsWith("image/")) return;
-    setBgUrl((prev) => {
-      if (prev) URL.revokeObjectURL(prev);
-      return URL.createObjectURL(file);
-    });
+    void (async () => {
+      const dataUrl = await fileToDataUrl(file).catch(() => null);
+      if (!dataUrl) return;
+      try {
+        localStorage.setItem(BG_KEY, dataUrl);
+      } catch {
+        // 超配额也在本次会话内生效,只是不持久化
+      }
+      setBgUrl((prev) => {
+        if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev);
+        return dataUrl;
+      });
+    })();
   }, []);
 
   async function renderBlob(): Promise<Blob> {

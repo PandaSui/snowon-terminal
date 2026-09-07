@@ -1,9 +1,9 @@
 import "dotenv/config";
 import { WebSocketServer, WebSocket } from "ws";
 import Redis from "ioredis";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { createDb } from "@terminal/db";
-import { chatMessages, chatUsers, getAppSettings, verifySession, type AppSettings } from "@terminal/db";
+import { chatMessages, chatUsers, userProfiles, getAppSettings, verifySession, type AppSettings } from "@terminal/db";
 import { verifySnowPayment, snowToWei } from "./pay.js";
 import { ethPriceUsd } from "./price.js";
 import { holdingShareBps, totalBoughtEth } from "./holdings.js";
@@ -90,11 +90,27 @@ function pinsKey(room: string) {
   return `pins:${room}`;
 }
 
-/** 清掉过期 pin 并返回当前活跃列表;有清除动作时返回 changed=true */
+/** 清掉过期 pin 并返回当前活跃列表;有清除动作时返回 changed=true。用户名用个人资料里的最新名字覆盖。 */
 async function activePins(room: string): Promise<{ pins: Pin[]; changed: boolean }> {
   const removed = await redis.zremrangebyscore(pinsKey(room), "-inf", Date.now());
   const raw = await redis.zrange(pinsKey(room), 0, -1);
-  return { pins: raw.map((r) => JSON.parse(r) as Pin), changed: removed > 0 };
+  const pins = raw.map((r) => JSON.parse(r) as Pin);
+  // pin 里存的是写入时的默认名;个人资料改名后,下发时用 user_profiles 里的最新名字覆盖
+  const chainId = Number(room.split(":")[0]);
+  const wallets = [...new Set(pins.map((p) => p.userId.toLowerCase()).filter((w) => /^0x[0-9a-f]{40}$/.test(w)))];
+  if (pins.length > 0 && wallets.length > 0 && Number.isFinite(chainId)) {
+    const rows = await db
+      .select({ wallet: userProfiles.wallet, username: userProfiles.username })
+      .from(userProfiles)
+      .where(and(eq(userProfiles.chainId, chainId), inArray(userProfiles.wallet, wallets)))
+      .catch(() => [] as Array<{ wallet: string; username: string | null }>);
+    const names = new Map(rows.map((r) => [r.wallet.toLowerCase(), r.username]));
+    for (const p of pins) {
+      const n = names.get(p.userId.toLowerCase());
+      if (n) p.username = n;
+    }
+  }
+  return { pins, changed: removed > 0 };
 }
 
 async function pushPins(room: string) {
