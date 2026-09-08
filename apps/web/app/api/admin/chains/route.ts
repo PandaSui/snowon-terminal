@@ -14,6 +14,7 @@ import { invalidateChainConfigCache, listChainConfigs, type ChainConfigRow } fro
  * GET    /api/admin/chains        列表 + 链上实时参数(只读)
  * PUT    /api/admin/chains        更新某链配置(需管理员钱包 header)
  * POST   /api/admin/chains        新增链配置(需管理员钱包 header)
+ * DELETE /api/admin/chains        删除发射台或整条链配置(需管理员)
  *
  * 鉴权说明(开发阶段):写操作校验 x-admin-wallet 请求头是否命中
  * ADMIN_WALLETS / NEXT_PUBLIC_ADMIN_WALLETS(逗号分隔)。这只是名单拦截,
@@ -103,17 +104,22 @@ export async function GET() {
       const envFactory = process.env[`PONS_FACTORY_${cid}`] ?? "";
       const envHook = process.env[`PONS_HOOK_${cid}`] ?? "";
       const envDeploy = process.env[`PONS_DEPLOY_BLOCK_${cid}`] ?? "";
-      const ponsFactory = row.ponsFactory && ADDR_RE.test(row.ponsFactory)
-        ? row.ponsFactory
-        : (ADDR_RE.test(envFactory) ? envFactory.toLowerCase() : DEFAULT_PONS_FACTORY);
-      const ponsHook = row.ponsHook && ADDR_RE.test(row.ponsHook)
-        ? row.ponsHook
-        : (ADDR_RE.test(envHook) ? envHook.toLowerCase() : DEFAULT_PONS_HOOK);
+      const ponsOn = row.ponsEnabled !== false;
+      const ponsFactory = !ponsOn
+        ? (row.ponsFactory || "")
+        : (row.ponsFactory && ADDR_RE.test(row.ponsFactory)
+          ? row.ponsFactory
+          : (ADDR_RE.test(envFactory) ? envFactory.toLowerCase() : DEFAULT_PONS_FACTORY));
+      const ponsHook = !ponsOn
+        ? (row.ponsHook || "")
+        : (row.ponsHook && ADDR_RE.test(row.ponsHook)
+          ? row.ponsHook
+          : (ADDR_RE.test(envHook) ? envHook.toLowerCase() : DEFAULT_PONS_HOOK));
       const dbDeploy = row.ponsDeployBlock != null ? BigInt(String(row.ponsDeployBlock).split(".")[0] || "0") : 0n;
-      const ponsDeployBlock = dbDeploy > 0n
+      const ponsDeployBlock = !ponsOn
         ? dbDeploy
-        : BigInt(envDeploy || String(DEFAULT_PONS_DEPLOY_BLOCK));
-      const filled = { ...row, ponsFactory, ponsHook, ponsDeployBlock };
+        : (dbDeploy > 0n ? dbDeploy : BigInt(envDeploy || String(DEFAULT_PONS_DEPLOY_BLOCK)));
+      const filled = { ...row, ponsFactory, ponsHook, ponsDeployBlock, snowonEnabled: row.snowonEnabled !== false, ponsEnabled: ponsOn };
       const onchain = await readOnchain(filled);
       let ponsTokenCount = 0;
       try {
@@ -133,7 +139,7 @@ export async function GET() {
 
 const EDITABLE = [
   "name", "rpcUrl", "wsUrl", "factory", "hook", "registry", "swapRouter", "poolManager", "deployBlock", "enabled",
-  "ponsFactory", "ponsHook", "ponsDeployBlock",
+  "ponsFactory", "ponsHook", "ponsDeployBlock", "snowonEnabled", "ponsEnabled",
 ] as const;
 const ADDR_KEYS = new Set(["factory", "hook", "registry", "swapRouter", "poolManager", "ponsFactory", "ponsHook"]);
 const BLOCK_KEYS = new Set(["deployBlock", "ponsDeployBlock"]);
@@ -150,7 +156,7 @@ function validatePatch(body: Record<string, unknown>): { patch: Record<string, u
       const n = Number(v);
       if (!Number.isFinite(n) || n < 0) return { patch, error: `${key} 必须是非负数字` };
       patch[key] = BigInt(Math.floor(n));
-    } else if (key === "enabled") {
+    } else if (key === "enabled" || key === "ponsEnabled" || key === "snowonEnabled") {
       patch[key] = !!v;
     } else if (key === "wsUrl") {
       patch[key] = typeof v === "string" && v.trim() ? v.trim() : null;
@@ -216,6 +222,44 @@ export async function POST(req: NextRequest) {
     if (!created) return NextResponse.json({ error: `chain ${chainId} 已存在,请用 PUT 修改` }, { status: 409 });
     invalidateChainConfigCache(chainId);
     return NextResponse.json(jsonSafe({ ok: true, chain: created }));
+  } catch (e) {
+    return apiError(e);
+  }
+}
+
+/**
+ * DELETE /api/admin/chains?chainId=4663&platform=snowon|pons|chain
+ * snowon/pons:停用该发射台(已索引代币保留)
+ * chain:删除整条链配置行
+ */
+export async function DELETE(req: NextRequest) {
+  const deny = await checkAdmin(req);
+  if (deny) return deny;
+  try {
+    const q = req.nextUrl.searchParams;
+    const chainId = Number(q.get("chainId"));
+    const platform = (q.get("platform") ?? "").toLowerCase();
+    if (!Number.isInteger(chainId) || chainId <= 0) {
+      return NextResponse.json({ error: "chainId 缺失或非法" }, { status: 400 });
+    }
+    if (platform === "chain") {
+      const [deleted] = await db.delete(chainConfigs).where(eq(chainConfigs.chainId, chainId)).returning();
+      if (!deleted) return NextResponse.json({ error: `chain ${chainId} 不存在` }, { status: 404 });
+      invalidateChainConfigCache(chainId);
+      return NextResponse.json({ ok: true, deleted: "chain", chainId });
+    }
+    if (platform === "pons" || platform === "snowon") {
+      const patch = platform === "pons" ? { ponsEnabled: false } : { snowonEnabled: false };
+      const [updated] = await db
+        .update(chainConfigs)
+        .set({ ...patch, updatedAt: new Date() })
+        .where(eq(chainConfigs.chainId, chainId))
+        .returning();
+      if (!updated) return NextResponse.json({ error: `chain ${chainId} 不存在` }, { status: 404 });
+      invalidateChainConfigCache(chainId);
+      return NextResponse.json(jsonSafe({ ok: true, chain: updated }));
+    }
+    return NextResponse.json({ error: "platform 必须是 snowon / pons / chain" }, { status: 400 });
   } catch (e) {
     return apiError(e);
   }

@@ -73,9 +73,11 @@ async function ensurePonsColumns(): Promise<void> {
       ponsFactory: chainConfigs.ponsFactory,
       ponsHook: chainConfigs.ponsHook,
       ponsDeployBlock: chainConfigs.ponsDeployBlock,
+      ponsEnabled: chainConfigs.ponsEnabled,
     })
     .from(chainConfigs);
   for (const row of rows) {
+    if (row.ponsEnabled === false) continue;
     const needFactory = !row.ponsFactory;
     const needHook = !row.ponsHook;
     const needDeploy = row.ponsDeployBlock == null || row.ponsDeployBlock === 0n;
@@ -139,6 +141,8 @@ export async function getChainConfig(chainId: number): Promise<ChainConfigRow | 
         ponsFactory: pons?.factory ?? DEFAULT_PONS_FACTORY,
         ponsHook: pons?.hook ?? DEFAULT_PONS_HOOK,
         ponsDeployBlock: pons?.deployBlock ?? DEFAULT_PONS_DEPLOY_BLOCK,
+        snowonEnabled: true,
+        ponsEnabled: true,
         enabled: true,
         updatedAt: new Date(0),
       };

@@ -268,6 +268,9 @@ export const chainConfigs = pgTable("chain_configs", {
   ponsFactory: varchar("pons_factory", { length: 42 }),
   ponsHook: varchar("pons_hook", { length: 42 }),
   ponsDeployBlock: bigint("pons_deploy_block", { mode: "bigint" }).default(0n),
+  /** 是否在终端展示/索引该发射台;删除发射台时置 false,已索引代币保留 */
+  snowonEnabled: boolean("snowon_enabled").notNull().default(true),
+  ponsEnabled: boolean("pons_enabled").notNull().default(true),
   enabled: boolean("enabled").notNull().default(true),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

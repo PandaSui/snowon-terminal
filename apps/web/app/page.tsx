@@ -92,6 +92,16 @@ export default function DiscoverPage() {
     },
     staleTime: 15_000,
   });
+  const { data: platforms } = useQuery({
+    queryKey: ["launchpad-flags"],
+    queryFn: async () => {
+      const res = await fetch(apiUrl("/api/settings"));
+      return readJson<{ snowonEnabled?: boolean; ponsEnabled?: boolean }>(res);
+    },
+    staleTime: 30_000,
+  });
+  const snowonOn = platforms?.snowonEnabled !== false;
+  const ponsOn = platforms?.ponsEnabled !== false;
   const chat = useGlobalChat(CHAIN_ID);
   const isMobile = useIsMobile();
   const [tab, setTab] = useState<"movers" | "fresh" | "almost" | "graduated" | "chat">("movers");
@@ -103,13 +113,22 @@ export default function DiscoverPage() {
     setPlatform(next);
     try { localStorage.setItem(PLATFORM_KEY, next); } catch { /* ignore */ }
   }
+  useEffect(() => {
+    if (platform === "pons" && !ponsOn) pickPlatform("all");
+    if (platform === "snowon" && !snowonOn) pickPlatform("all");
+  }, [platform, ponsOn, snowonOn]);
 
   // 管理员钱包(env 主管理员 ∪ DB 协管员)才显示「管理」入口
   const wallet = user?.wallet?.address?.toLowerCase() ?? "";
   const isAdmin = useAdmins(wallet).isAdmin;
 
   const lists = useMemo(() => {
-    const all = (tokens ?? []).filter((t) => platform === "all" || tokenPlatform(t) === platform);
+    const all = (tokens ?? []).filter((t) => {
+      const p = tokenPlatform(t);
+      if (p === "pons" && !ponsOn) return false;
+      if (p !== "pons" && !snowonOn) return false;
+      return platform === "all" || p === platform;
+    });
     const num = (v: string | null) => (v == null ? -Infinity : Number(v));
     return {
       // 异动代币:以毕业代币为主,按市值飙升(24h 涨幅)排序
@@ -125,7 +144,7 @@ export default function DiscoverPage() {
         .filter((t) => t.graduated)
         .sort((a, b) => +new Date(b.graduatedAt ?? b.createdAt) - +new Date(a.graduatedAt ?? a.createdAt)),
     };
-  }, [tokens, platform]);
+  }, [tokens, platform, snowonOn, ponsOn]);
 
   const columns = [
     { key: "movers" as const, title: t(locale, "movers"), short: t(locale, "movers"), dot: "#f6465d", tokens: lists.movers, empty: "—" },
@@ -189,14 +208,19 @@ export default function DiscoverPage() {
       </header>
 
       {/* 标星收藏代币栏 */}
-      <FavoritesBar tokens={(tokens ?? []).filter((t) => platform === "all" || tokenPlatform(t) === platform)} />
+      <FavoritesBar tokens={(tokens ?? []).filter((t) => {
+        const p = tokenPlatform(t);
+        if (p === "pons" && !ponsOn) return false;
+        if (p !== "pons" && !snowonOn) return false;
+        return platform === "all" || p === platform;
+      })} />
 
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0, flexWrap: "wrap" }}>
         <span style={{ fontSize: 11, color: "#5e6673", fontWeight: 700 }}>{t(locale, "platform")}</span>
         {([
           ["all", t(locale, "all")],
-          ["snowon", t(locale, "platformSnowon")],
-          ["pons", t(locale, "platformPons")],
+          ...(snowonOn ? [["snowon", t(locale, "platformSnowon")] as const] : []),
+          ...(ponsOn ? [["pons", t(locale, "platformPons")] as const] : []),
         ] as const).map(([key, label]) => (
           <button
             key={key}

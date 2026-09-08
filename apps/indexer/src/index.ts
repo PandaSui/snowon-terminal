@@ -141,6 +141,7 @@ function poolFromGrad(log: Log): Hex | null {
 async function resolvePons(cfg: ChainConfig, db: ReturnType<typeof createDb>): Promise<PonsEnv | null> {
   try {
     const [row] = await db.select().from(chainConfigs).where(eq(chainConfigs.chainId, cfg.chainId)).limit(1);
+    if (row && row.ponsEnabled === false) return null;
     return mergePonsConfig(cfg.chainId, cfg.poolManager, row);
   } catch (e) {
     console.warn(`[chain ${cfg.chainId}] pons DB merge failed, env/defaults:`, (e as Error).message);
@@ -151,12 +152,16 @@ async function resolvePons(cfg: ChainConfig, db: ReturnType<typeof createDb>): P
 async function runChain(cfg: ChainConfig, db: ReturnType<typeof createDb>, redis: Redis) {
   const client = clientFor(cfg);
   const publish = (ch: string, payload: unknown) => void redis.publish(ch, JSON.stringify(payload));
-  const ponsEnv = await resolvePons(cfg, db);
+  const [cfgRow] = await db.select().from(chainConfigs).where(eq(chainConfigs.chainId, cfg.chainId)).limit(1);
+  const snowonOn = cfgRow?.enabled !== false && cfgRow?.snowonEnabled !== false;
+  const ponsOn = cfgRow?.enabled !== false && cfgRow?.ponsEnabled !== false;
+  const ponsEnv = ponsOn ? await resolvePons(cfg, db) : null;
   const h = new EventHandlers(
     db, client, cfg, publish,
     ponsEnv ? { factory: ponsEnv.factory, hook: ponsEnv.hook } : undefined,
   );
   const onErr = (e: unknown) => console.error(e);
+  console.log(`[chain ${cfg.chainId}] launchpads snowon=${snowonOn} pons=${!!ponsEnv}`);
 
   const tokenRows = await db
     .select({
@@ -169,21 +174,22 @@ async function runChain(cfg: ChainConfig, db: ReturnType<typeof createDb>, redis
     })
     .from(tokens)
     .where(eq(tokens.chainId, cfg.chainId));
+  const liveRows = tokenRows.filter((r) => (r.platformId === "pons" ? ponsOn : snowonOn));
   const curveSet = new Set<Address>(
-    tokenRows.filter((r) => r.platformId !== "pons").map((r) => r.curveAddress.toLowerCase() as Address),
+    liveRows.filter((r) => r.platformId !== "pons").map((r) => r.curveAddress.toLowerCase() as Address),
   );
   // 已毕业的 Pons 走 V4 池,live 不必再扫曲线 Buy/Sell(上千条地址会把 RPC 打满 429)
   const ponsCurveSet = new Set<Address>(
-    tokenRows
+    liveRows
       .filter((r) => r.platformId === "pons" && !r.graduated)
       .map((r) => r.curveAddress.toLowerCase() as Address),
   );
-  const tokenSet = new Set<Address>(tokenRows.map((r) => r.address.toLowerCase() as Address));
+  const tokenSet = new Set<Address>(liveRows.map((r) => r.address.toLowerCase() as Address));
   const curveOfToken = new Map<string, Address>(
     tokenRows.map((r) => [r.address.toLowerCase(), r.curveAddress.toLowerCase() as Address]),
   );
   const poolSet = new Set<Hex>(
-    tokenRows.map((r) => r.poolId).filter((id): id is string => Boolean(id)).map((id) => id.toLowerCase() as Hex),
+    liveRows.map((r) => r.poolId).filter((id): id is string => Boolean(id)).map((id) => id.toLowerCase() as Hex),
   );
 
   const stored = await loadCursor(db, cfg.chainId);
@@ -278,9 +284,11 @@ async function runChain(cfg: ChainConfig, db: ReturnType<typeof createDb>, redis
 
   async function processRange(fromBlock: bigint, toBlock: bigint, opts?: { includeTransfers?: boolean }) {
     console.log(`[chain ${cfg.chainId}] range ${fromBlock}-${toBlock} ponsCurves=${ponsCurveSet.size}`);
-    const created = await getLogsWithRetry(client, {
-      address: cfg.factory, event: evCoinCreated, fromBlock, toBlock,
-    });
+    const created = snowonOn
+      ? await getLogsWithRetry(client, {
+          address: cfg.factory, event: evCoinCreated, fromBlock, toBlock,
+        })
+      : [];
     created.sort(logOrder);
     await h.prefetchBlockTimes(created.map((l) => l.blockNumber));
     for (const log of created) {

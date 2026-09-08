@@ -29,6 +29,8 @@ interface AdminChain {
   ponsHook: string;
   ponsDeployBlock: string;
   ponsTokenCount?: number;
+  snowonEnabled?: boolean;
+  ponsEnabled?: boolean;
   enabled: boolean;
   updatedAt: string;
   onchain: Record<string, unknown>;
@@ -67,6 +69,10 @@ const btnGold: React.CSSProperties = {
 const btnGhost: React.CSSProperties = {
   background: "transparent", border: "1px solid #2b3139", borderRadius: 6,
   padding: "6px 12px", fontSize: 12, color: "#848e9c", cursor: "pointer",
+};
+
+const btnDanger: React.CSSProperties = {
+  ...btnGhost, color: "#f6465d", borderColor: "rgba(246,70,93,0.45)",
 };
 
 function shortAddr(a: string) {
@@ -156,6 +162,25 @@ function ChainForm({
   );
 }
 
+async function adminDeletePad(token: string, chainId: number, platform: "snowon" | "pons" | "chain") {
+  const res = await fetch(apiUrl(`/api/admin/chains?chainId=${chainId}&platform=${platform}`), {
+    method: "DELETE",
+    headers: { authorization: "Bearer " + token },
+  });
+  const body = await readJson<{ error?: string }>(res);
+  if (!res.ok) throw new Error(body.error ?? `删除失败(${res.status})`);
+}
+
+async function adminEnablePad(token: string, chainId: number, platform: "snowon" | "pons") {
+  const res = await fetch(apiUrl("/api/admin/chains"), {
+    method: "PUT",
+    headers: { "content-type": "application/json", authorization: "Bearer " + token },
+    body: JSON.stringify(platform === "pons" ? { chainId, ponsEnabled: true } : { chainId, snowonEnabled: true }),
+  });
+  const body = await readJson<{ error?: string }>(res);
+  if (!res.ok) throw new Error(body.error ?? `启用失败(${res.status})`);
+}
+
 function ChainCard({ chain, isAdmin }: { chain: AdminChain; isAdmin: boolean }) {
   const qc = useQueryClient();
   const { ensure } = useSession();
@@ -179,6 +204,15 @@ function ChainCard({ chain, isAdmin }: { chain: AdminChain; isAdmin: boolean }) 
     },
   });
 
+  const pad = useMutation({
+    mutationFn: async (action: "delete" | "enable" | "delete-chain") => {
+      const token = await ensure();
+      if (action === "enable") await adminEnablePad(token, chain.chainId, "snowon");
+      else await adminDeletePad(token, chain.chainId, action === "delete-chain" ? "chain" : "snowon");
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-chains"] }),
+  });
+
   const split = oc.protocolSplit as { creatorBps: number; snowBuyBps: number; revenueBps: number } | null | undefined;
 
   return (
@@ -193,9 +227,10 @@ function ChainCard({ chain, isAdmin }: { chain: AdminChain; isAdmin: boolean }) 
         <span style={{ fontSize: 11, color: "#f0b90b", background: "rgba(240,185,11,0.12)", borderRadius: 8, padding: "1px 8px" }}>
           SnowOn
         </span>
+        {chain.snowonEnabled === false && <span style={{ fontSize: 11, color: "#f6465d" }}>已删除</span>}
         {!chain.enabled && <span style={{ fontSize: 11, color: "#f6465d" }}>已停用</span>}
         <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-          {isAdmin && !editing && (
+          {isAdmin && !editing && chain.snowonEnabled !== false && (
             <button onClick={() => setEditing(true)} style={btnGhost}>✏️ 编辑参数</button>
           )}
         </span>
@@ -262,6 +297,41 @@ function ChainCard({ chain, isAdmin }: { chain: AdminChain; isAdmin: boolean }) 
           onSubmit={(v) => save.mutate(v)}
           onCancel={() => setEditing(false)}
         />
+      )}
+      {isAdmin && (
+        <div style={{ padding: "10px 14px", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", borderTop: "1px solid #1e2329" }}>
+          {chain.snowonEnabled === false ? (
+            <button
+              disabled={pad.isPending}
+              onClick={() => {
+                if (confirm("重新启用 SnowOn 发射台？改完需重启 indexer 才会继续索引新币。")) pad.mutate("enable");
+              }}
+              style={btnGold}
+            >
+              重新启用 SnowOn
+            </button>
+          ) : (
+            <button
+              disabled={pad.isPending}
+              onClick={() => {
+                if (confirm("删除 SnowOn 发射台配置？已索引代币保留，首页不再展示该平台。改完需重启 indexer。")) pad.mutate("delete");
+              }}
+              style={btnDanger}
+            >
+              删除 SnowOn 发射台
+            </button>
+          )}
+          <button
+            disabled={pad.isPending}
+            onClick={() => {
+              if (confirm(`确定删除 chain ${chain.chainId} 的全部配置(含 SnowOn 与 Pons V2)？此操作不可恢复。`)) pad.mutate("delete-chain");
+            }}
+            style={btnDanger}
+          >
+            删除整条链配置
+          </button>
+          {pad.error && <span style={{ color: "#f6465d", fontSize: 12 }}>{(pad.error as Error).message}</span>}
+        </div>
       )}
     </section>
   );
@@ -339,10 +409,21 @@ function PonsV2Card({ chain, isAdmin }: { chain: AdminChain; isAdmin: boolean })
     },
   });
 
+  const pad = useMutation({
+    mutationFn: async (action: "delete" | "enable") => {
+      const token = await ensure();
+      if (action === "enable") await adminEnablePad(token, chain.chainId, "pons");
+      else await adminDeletePad(token, chain.chainId, "pons");
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-chains"] }),
+  });
+
+  const ponsOn = chain.ponsEnabled !== false;
+
   return (
-    <section style={{ border: "1px solid #1e2329", borderRadius: 10, background: "#0d1117", overflow: "hidden" }}>
+    <section style={{ border: "1px solid #1e2329", borderRadius: 10, background: "#0d1117", overflow: "hidden", opacity: ponsOn ? 1 : 0.72 }}>
       <header style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderBottom: "1px solid #1e2329", flexWrap: "wrap" }}>
-        <span style={{ width: 10, height: 10, borderRadius: 5, background: chain.enabled ? "#00c3ff" : "#f6465d" }} />
+        <span style={{ width: 10, height: 10, borderRadius: 5, background: ponsOn ? "#00c3ff" : "#f6465d" }} />
         <span style={{ fontSize: 15, fontWeight: 800 }}>{chain.name}</span>
         <span style={{ fontSize: 11, color: "#5e6673", background: "#1e2329", borderRadius: 8, padding: "1px 8px" }}>
           chainId {chain.chainId}
@@ -350,8 +431,9 @@ function PonsV2Card({ chain, isAdmin }: { chain: AdminChain; isAdmin: boolean })
         <span style={{ fontSize: 11, color: "#00c3ff", background: "rgba(0,195,255,0.12)", borderRadius: 8, padding: "1px 8px" }}>
           Pons V2
         </span>
+        {!ponsOn && <span style={{ fontSize: 11, color: "#f6465d" }}>已删除</span>}
         <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-          {isAdmin && !editing && (
+          {isAdmin && !editing && ponsOn && (
             <button onClick={() => setEditing(true)} style={btnGhost}>✏️ 编辑参数</button>
           )}
         </span>
@@ -410,6 +492,32 @@ function PonsV2Card({ chain, isAdmin }: { chain: AdminChain; isAdmin: boolean })
           onSubmit={(v) => save.mutate(v)}
           onCancel={() => setEditing(false)}
         />
+      )}
+      {isAdmin && (
+        <div style={{ padding: "10px 14px", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", borderTop: "1px solid #1e2329" }}>
+          {ponsOn ? (
+            <button
+              disabled={pad.isPending}
+              onClick={() => {
+                if (confirm("删除 Pons V2 发射台配置？已索引代币保留，首页不再展示该平台。改完需重启 indexer。")) pad.mutate("delete");
+              }}
+              style={btnDanger}
+            >
+              删除 Pons V2 发射台
+            </button>
+          ) : (
+            <button
+              disabled={pad.isPending}
+              onClick={() => {
+                if (confirm("重新启用 Pons V2 发射台？改完需重启 indexer 才会继续索引新币。")) pad.mutate("enable");
+              }}
+              style={btnGold}
+            >
+              重新启用 Pons V2
+            </button>
+          )}
+          {pad.error && <span style={{ color: "#f6465d", fontSize: 12 }}>{(pad.error as Error).message}</span>}
+        </div>
       )}
     </section>
   );
