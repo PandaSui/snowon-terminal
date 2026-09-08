@@ -71,3 +71,22 @@ export function snowToWei(price: string): bigint {
   const whole = String(price).trim().split(".")[0] || "0";
   return BigInt(whole) * 10n ** 18n;
 }
+
+// Pixel Bears (SnowPass) NFT 合约。持有者可免费叮住。
+const PIXEL_BEARS = (process.env.PIXEL_BEARS_ADDRESS || "0x8bA05220210bCBA1335451175f8581BF1C82Ab99").toLowerCase();
+
+/**
+ * 是否持有至少一枚 Pixel Bears NFT。读链 balanceOf(owner) > 0。
+ * owner 应为经 verifySession 得到的可信钱包地址,不可用前端传入的地址(可伪造)。
+ */
+export async function hasPixelBears(owner: string): Promise<boolean> {
+  if (!/^0x[0-9a-fA-F]{40}$/.test(owner)) return false;
+  // balanceOf(address) — selector 0x70a08231
+  const data = "0x70a08231" + owner.toLowerCase().replace(/^0x/, "").padStart(64, "0");
+  try {
+    const result = await rpc<string>("eth_call", [{ to: PIXEL_BEARS, data }, "latest"]);
+    return BigInt(result || "0x0") > 0n;
+  } catch {
+    return false;
+  }
+}

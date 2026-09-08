@@ -4,7 +4,7 @@ import Redis from "ioredis";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { createDb } from "@terminal/db";
 import { chatMessages, chatUsers, getAppSettings, verifySession, type AppSettings } from "@terminal/db";
-import { verifySnowPayment, snowToWei } from "./pay.js";
+import { verifySnowPayment, snowToWei, hasPixelBears } from "./pay.js";
 import { holdingShareBps, totalBoughtEth } from "./holdings.js";
 
 // 鉴权:客户端签名登录换取会话令牌,连接时带来,服务端 verifySession 得到可信钱包地址。
@@ -226,26 +226,37 @@ async function handleMessage(ctx: ClientCtx, raw: string) {
     if (!content.trim()) return;
 
     const s = await settings();
-    // ── 付费校验:必须带一笔有效的 SNOW 付款交易 ──
-    if (!msg.payTxHash) {
-      return ctx.ws.send(JSON.stringify({ t: "error", message: `叮住需付费 ${s.pinPriceSnow} SNOW` }));
-    }
-    // 防重放:同一 txHash 只能用一次(原子占位,验证失败再释放)
-    const txId = msg.payTxHash.toLowerCase();
-    if ((await redis.sadd("pin:usedtx", txId)) === 0) {
-      return ctx.ws.send(JSON.stringify({ t: "error", message: "该付款交易已被使用过" }));
-    }
-    const check = await verifySnowPayment({
-      txHash: msg.payTxHash,
-      payee: s.pinPayee,
-      priceWei: snowToWei(s.pinPriceSnow),
-      payer: msg.payer, // 前端传的钱包地址(userId 是 Privy id,非链上地址)
-    });
-    if (!check.ok) {
-      await redis.srem("pin:usedtx", txId);
-      return ctx.ws.send(JSON.stringify({ t: "error", message: "付款校验失败:" + (check.reason ?? "") }));
+    // ── 校验:持有 Pixel Bears NFT 的钱包免费叮住,否则需一笔有效的 SNOW 付款 ──
+    const isFree = !msg.payTxHash;
+    if (isFree) {
+      // 用验签得到的钱包地址(ctx.wallet)查链上持有,不可用前端传入的 payer(可伪造)
+      const holder = ctx.wallet ? await hasPixelBears(ctx.wallet) : false;
+      if (!holder) {
+        return ctx.ws.send(JSON.stringify({ t: "error", message: `叮住需付费 ${s.pinPriceSnow} SNOW,或持有 Pixel Bears NFT 免费` }));
+      }
+    } else {
+      // 防重放:同一 txHash 只能用一次(原子占位,验证失败再释放)
+      const txId = msg.payTxHash!.toLowerCase();
+      if ((await redis.sadd("pin:usedtx", txId)) === 0) {
+        return ctx.ws.send(JSON.stringify({ t: "error", message: "该付款交易已被使用过" }));
+      }
+      const check = await verifySnowPayment({
+        txHash: msg.payTxHash!,
+        payee: s.pinPayee,
+        priceWei: snowToWei(s.pinPriceSnow),
+        payer: msg.payer, // 付费路径由 txHash 的 from==payer 佐证真实性
+      });
+      if (!check.ok) {
+        await redis.srem("pin:usedtx", txId);
+        return ctx.ws.send(JSON.stringify({ t: "error", message: "付款校验失败:" + (check.reason ?? "") }));
+      }
     }
 
+    const key = pinsKey(msg.room);
+    // 免费叮住:满了就等待(不挤掉付费的);付费叮住:仍可挤掉最早过期的一条
+    if (isFree && (await redis.zcard(key)) >= s.pinMax) {
+      return ctx.ws.send(JSON.stringify({ t: "error", message: `叮住位已满(最多 ${s.pinMax} 条),请稍后再试` }));
+    }
     const user = await db.select().from(chatUsers).where(eq(chatUsers.id, ctx.userId)).limit(1);
     const pin: Pin = {
       id: crypto.randomUUID(),
@@ -255,9 +266,8 @@ async function handleMessage(ctx: ClientCtx, raw: string) {
       expiresAt: Date.now() + s.pinDurationSec * 1000,
       payTxHash: msg.payTxHash,
     };
-    const key = pinsKey(msg.room);
     await redis.zadd(key, pin.expiresAt, JSON.stringify(pin));
-    // 上限:挤掉最早过期的
+    // 上限:挤掉最早过期的(付费路径;免费已在上面拦截)
     const count = await redis.zcard(key);
     if (count > s.pinMax) await redis.zremrangebyrank(key, 0, count - s.pinMax - 1);
     await pushPins(msg.room);
