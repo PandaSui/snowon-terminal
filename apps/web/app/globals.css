@@ -12,6 +12,23 @@
   50% { opacity: 0.45; }
 }
 
+@keyframes gold-shimmer {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 220% 50%; }
+}
+@keyframes gold-flash {
+  0%, 100% { filter: drop-shadow(0 0 2px #f0b90b) drop-shadow(0 0 8px rgba(240,185,11,0.65)); opacity: 1; }
+  50% { filter: drop-shadow(0 0 6px #fff2cc) drop-shadow(0 0 14px #f0b90b) drop-shadow(0 0 20px #ff8a00); opacity: 0.88; }
+}
+.mult-gold {
+  background: linear-gradient(90deg, #8a6a00, #f0b90b, #ffe27a, #f0b90b, #8a6a00);
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: gold-shimmer 1.5s linear infinite, gold-flash 0.85s ease-in-out infinite;
+}
+
 .pin-flash {
   background: linear-gradient(90deg, #ff004c, #ff8a00, #ffee00, #33ff57, #00c3ff, #b15bff, #ff004c);
   background-size: 600% 100%;
@@ -278,8 +295,16 @@ body {
 .track-row:hover {
   background: #12161e;
 }
+.pnl-board {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(260px, 1fr);
+  gap: 14px;
+  align-items: stretch;
+}
 @media (max-width: 980px) {
-  .asset-three {
+  .asset-three,
+  .asset-two,
+  .pnl-board {
     grid-template-columns: 1fr !important;
   }
 }

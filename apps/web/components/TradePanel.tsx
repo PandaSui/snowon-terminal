@@ -1,8 +1,9 @@
 "use client";
 
 import { apiUrl } from "@/lib/apiBase";
+import { readJson } from "@/lib/http";
 import { useT } from "@/lib/locale";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { parseEther, parseUnits, formatEther, type Address } from "viem";
 
@@ -58,9 +59,18 @@ export function TradePanel({
   graduated: boolean;
 }) {
   const tr = useT();
-  const { authenticated, login } = usePrivy();
-  const { wallets } = useWallets();
-  const wallet = wallets[0];
+  const { ready, authenticated, login, user } = usePrivy();
+  const { wallets, ready: walletsReady } = useWallets();
+  const wallet = useMemo(() => {
+    const list = wallets ?? [];
+    const addr = user?.wallet?.address?.toLowerCase();
+    if (addr) {
+      const hit = list.find((w) => w.address.toLowerCase() === addr);
+      if (hit) return hit;
+    }
+    return list[0];
+  }, [wallets, user?.wallet?.address]);
+  const tradeReady = ready && walletsReady;
   const [side, setSide] = useState<Side>("buy");
   const [amount, setAmount] = useState("");
   const [slippageBps, setSlippageBps] = useState(500);
@@ -124,8 +134,9 @@ export function TradePanel({
   }, [wallet, token]);
 
   useEffect(() => {
+    if (!wallet) return;
     void refreshBals();
-  }, [refreshBals]);
+  }, [refreshBals, wallet]);
 
   useEffect(() => {
     let cancelled = false;
@@ -190,13 +201,21 @@ export function TradePanel({
   }
 
   function fillSellPct(pct: number) {
-    if (tokenBal <= 0n) return;
+    if (tokenBal <= 0n) {
+      setStatus(tr("noSellPos"));
+      return;
+    }
     setSide("sell");
     setAmount(trimAmt((tokenBal * BigInt(pct)) / 100n));
   }
 
   async function execute(nextSide: Side, amountIn: bigint) {
+    if (!tradeReady) {
+      setStatus(tr("connecting"));
+      return;
+    }
     if (!wallet) {
+      setStatus(tr("connectWallet"));
       login();
       return;
     }
@@ -212,8 +231,8 @@ export function TradePanel({
     setStatus(tr("quoting"));
     try {
       const quoteRes = await fetch(apiUrl(`/api/quote?token=${token}&side=${nextSide}&amount=${amountIn}`));
-      const quote = (await quoteRes.json()) as { amountOut?: string; error?: string };
-      if (quote.error || !quote.amountOut) throw new Error(quote.error ?? "quote failed");
+      const quote = await readJson<{ amountOut?: string; error?: string }>(quoteRes);
+      if (!quoteRes.ok || quote.error || !quote.amountOut) throw new Error(quote.error ?? tr("quoteFailed"));
       const minOut = (BigInt(quote.amountOut) * BigInt(10_000 - slippageBps)) / 10_000n;
 
       setStatus(tr("buildingTx"));
@@ -228,20 +247,24 @@ export function TradePanel({
           recipient: wallet.address,
         }),
       });
-      const txs: Array<{ to: Address; data: `0x${string}`; value: string; chainId: number }> = await txRes.json();
-      if (!Array.isArray(txs)) throw new Error((txs as { error?: string }).error ?? "build failed");
+      const txs = await readJson<Array<{ to: Address; data: `0x${string}`; value: string; chainId: number }> | { error?: string }>(txRes);
+      if (!txRes.ok || !Array.isArray(txs)) throw new Error((txs as { error?: string }).error ?? "build failed");
 
-      const provider = await wallet.getEthereumProvider();
+      setStatus(tr("switchNet"));
       const walletChain = Number(String(wallet.chainId).split(":").pop());
-      if (walletChain !== chainId) {
-        setStatus(tr("switchNet"));
-        await wallet.switchChain(chainId);
-      }
+      if (walletChain !== chainId) await wallet.switchChain(chainId);
+      // switchChain 后必须重新取 provider,否则签名弹窗出不来或打到旧链
+      const provider = await wallet.getEthereumProvider();
       for (const [i, tx] of txs.entries()) {
         setStatus(txs.length > 1 ? tr("signingN", { i: i + 1, n: txs.length }) : tr("signing"));
         const hash = (await provider.request({
           method: "eth_sendTransaction",
-          params: [{ from: wallet.address, to: tx.to, data: tx.data, value: `0x${BigInt(tx.value).toString(16)}` }],
+          params: [{
+            from: wallet.address,
+            to: tx.to,
+            data: tx.data,
+            value: `0x${BigInt(tx.value).toString(16)}`,
+          }],
         })) as string;
         setStatus(txs.length > 1 ? tr("waitingN", { i: i + 1, n: txs.length }) : tr("waiting"));
         await waitReceipt(provider, hash);
@@ -249,7 +272,7 @@ export function TradePanel({
       setStatus(tr("sent"));
       void refreshBals();
     } catch (e) {
-      setStatus(`❌ ${(e as Error).message.slice(0, 120)}`);
+      setStatus(`❌ ${(e as Error).message.slice(0, 160)}`);
     } finally {
       busyRef.current = false;
       setBusy(false);
@@ -376,8 +399,18 @@ export function TradePanel({
           {antiBundle && !graduated && <span style={{ color: "#f0b90b" }}> · {tr("eoaOnly")}</span>}
         </div>
 
-        {authenticated ? (
+        {!authenticated || !wallet ? (
           <button
+            type="button"
+            onClick={login}
+            disabled={authenticated && !tradeReady}
+            style={{ width: "100%", padding: 13, border: 0, borderRadius: 8, background: "#f0b90b", fontWeight: 800, fontSize: 14, cursor: "pointer" }}
+          >
+            {authenticated && !tradeReady ? tr("connecting") : tr("loginToTrade")}
+          </button>
+        ) : (
+          <button
+            type="button"
             onClick={submit}
             disabled={busy}
             style={{
@@ -388,12 +421,8 @@ export function TradePanel({
           >
             {busy ? tr("processing") : side === "buy" ? tr("buy") : tr("sell")}
           </button>
-        ) : (
-          <button onClick={login} style={{ width: "100%", padding: 13, border: 0, borderRadius: 8, background: "#f0b90b", fontWeight: 800, fontSize: 14, cursor: "pointer" }}>
-            {tr("loginToTrade")}
-          </button>
         )}
-        {status && <div style={{ marginTop: 8, fontSize: 12, color: "#848e9c" }}>{status}</div>}
+        {status && <div style={{ marginTop: 8, fontSize: 12, color: "#f0b90b" }}>{status}</div>}
       </div>
 
       {/* 快捷买卖:点即成交 */}

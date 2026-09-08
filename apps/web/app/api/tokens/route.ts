@@ -76,10 +76,13 @@ export async function GET() {
           WHERE tr.chain_id = t.chain_id
             AND tr.token_address = t.address
             AND tr.kind IN ('buy', 'sell')
+            AND tr.price_eth > 1e-14 AND tr.price_eth < 0.01
+            AND tr.eth_amount::numeric < 1e22
             AND tr.block_timestamp >= now() - interval '24 hours'
         ) v24 ON true
         LEFT JOIN latest_prices lp
           ON lp.token_address = t.address AND lp.chain_id = t.chain_id
+          AND lp.price_eth > 1e-14 AND lp.price_eth < 0.01
         LEFT JOIN bundle_scores bs
           ON bs.token_address = t.address AND bs.chain_id = t.chain_id
         LEFT JOIN LATERAL (
@@ -88,7 +91,7 @@ export async function GET() {
           WHERE tr.chain_id = t.chain_id
             AND tr.token_address = t.address
             AND tr.kind IN ('buy', 'sell')
-            AND tr.price_eth > 0
+            AND tr.price_eth > 1e-14 AND tr.price_eth < 0.01
           ORDER BY tr.block_timestamp DESC
           LIMIT 1
         ) lastp ON true
@@ -98,7 +101,7 @@ export async function GET() {
           WHERE tr.chain_id = t.chain_id
             AND tr.token_address = t.address
             AND tr.kind IN ('buy', 'sell')
-            AND tr.price_eth > 0
+            AND tr.price_eth > 1e-14 AND tr.price_eth < 0.01
             AND tr.block_timestamp >= now() - interval '24 hours'
           ORDER BY tr.block_timestamp ASC
           LIMIT 1
@@ -166,6 +169,8 @@ export async function GET() {
           SELECT tr.price_eth, tr.block_timestamp
           FROM trades tr
           WHERE tr.chain_id = ${CHAIN_ID} AND tr.token_address = l.address
+            AND tr.kind IN ('buy', 'sell')
+            AND tr.price_eth > 1e-14 AND tr.price_eth < 0.01
           ORDER BY tr.block_timestamp DESC
           LIMIT 32
         ) x

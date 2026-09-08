@@ -3,6 +3,12 @@
 import { useEffect, useState } from "react";
 
 export type QuoteUnit = "eth" | "usd";
+
+/** 本链 10 亿枚代币的合理 ETH/枚区间。超出即脏成交(hop 把另一腿数量当成 ETH)。 */
+export function isSanePriceEth(priceEth: string | number | null | undefined): boolean {
+  const n = typeof priceEth === "number" ? priceEth : Number(priceEth);
+  return Number.isFinite(n) && n > 1e-14 && n < 0.01;
+}
 export const QUOTE_UNIT_KEY = "quote.unit";
 export const QUOTE_UNIT_EVENT = "quote-unit";
 

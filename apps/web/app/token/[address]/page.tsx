@@ -25,7 +25,7 @@ import { AppNav } from "@/components/AppNav";
 import { readJson } from "@/lib/http";
 import { useIsMobile } from "@/lib/useIsMobile";
 import { FAVORITES_EVENT, isFavorite, toggleFavorite } from "@/lib/favorites";
-import { fmtMcapUsd, fmtPriceUsd, fmtUsdCompact, weiToEth } from "@/lib/quoteUnit";
+import { fmtMcapUsd, fmtPriceUsd, fmtUsdCompact, isSanePriceEth, weiToEth } from "@/lib/quoteUnit";
 import { useTranslatedTexts } from "@/lib/useTranslated";
 import { useT } from "@/lib/locale";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
@@ -253,12 +253,13 @@ export default function TokenPage() {
   if (isError) return <main style={{ padding: 24 }}>{`${tr("loadFailed")}: ${(error as Error).message}`}</main>;
   if (!token || token.notFound) return <main style={{ padding: 24 }}>{tr("tokenMissing")}</main>;
 
-  const change = fmtChange(homeToken?.change24hPct);
   const ethUsd = eth?.price;
-  const priceEth = homeToken?.priceEth ?? token.priceEth ?? null;
-  const mcapEth = homeToken?.mcapEth ?? token.mcapEth ?? (
-    priceEth != null && Number(priceEth) > 0 ? String(Number(priceEth) * 1_000_000_000) : null
-  );
+  const rawPx = homeToken?.priceEth ?? token.priceEth ?? null;
+  const priceEth = isSanePriceEth(rawPx) ? rawPx : null;
+  const change = fmtChange(priceEth ? homeToken?.change24hPct : null);
+  const mcapEth = priceEth != null
+    ? String(Number(priceEth) * 1_000_000_000)
+    : null;
   const buyTaxShown = token.buyTaxBps ?? 0;
   const sellTaxShown = token.sellTaxBps ?? 0;
   const feeEth = weiToEth(token.totalFeesWei);
@@ -269,13 +270,16 @@ export default function TokenPage() {
   const vol24Text = ethUsd && vol24Eth > 0 ? fmtUsdCompact(vol24Eth * ethUsd) : "$0";
   const poolText = (() => {
     if (!ethUsd) return "$-";
-    const quoteIsEth = pool?.quoteIsEth !== false;
+    const px = Number(priceEth);
+    const sane = isSanePriceEth(px);
+    const quoteIsEth = pool?.quoteIsEth === true;
     const q = Number(pool?.current?.quote ?? pool?.initial?.quote ?? 0);
     const tok = Number(pool?.current?.token ?? pool?.initial?.token ?? 0);
-    if (quoteIsEth && q > 0) return fmtUsdCompact(q * ethUsd);
-    if (tok > 0 && priceEth != null && Number(priceEth) > 0) {
-      return fmtUsdCompact(tok * Number(priceEth) * ethUsd);
+    if (quoteIsEth && q > 0) {
+      const tokenEth = sane && tok > 0 ? tok * px : q;
+      return fmtUsdCompact((q + tokenEth) * ethUsd);
     }
+    if (sane && tok > 0) return fmtUsdCompact(tok * px * 2 * ethUsd);
     const progress = Number(homeToken?.graduationProgress ?? 0);
     const thresholdWei = Number(token.graduationThreshold ?? 0);
     if (quoteIsEth && progress > 0 && thresholdWei > 0) {
@@ -338,8 +342,7 @@ export default function TokenPage() {
         <TokenLogo src={token.logoUri ?? null} alt={token.symbol ?? ""} size={44} />
         <div style={{ minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 17, fontWeight: 800 }}>{nameT || token.name}</span>
-            <span style={{ fontSize: 13, color: "#848e9c" }}>${token.symbol}</span>
+            <span style={{ fontSize: 17, fontWeight: 800 }}>{token.symbol}</span>
             <button
               onClick={() => toggleFavorite(address)}
               title={fav ? tr("unfav") : tr("fav")}
@@ -347,6 +350,9 @@ export default function TokenPage() {
             >
               {fav ? "★" : "☆"}
             </button>
+          </div>
+          <div style={{ fontSize: 13, color: "#848e9c", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            {nameT || token.name}
           </div>
           <button
             onClick={copyAddress}
@@ -410,7 +416,9 @@ export default function TokenPage() {
 
       {/* PNL(可分享) + 各周期总/买/卖成交量(点击同步 K 线) */}
       <section style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "stretch" }}>
-        <PnlShareCard tokenAddress={address} symbol={token.symbol ?? ""} />
+        <div style={{ flex: "0 1 320px", minWidth: 260, display: "flex" }}>
+          <PnlShareCard tokenAddress={address} symbol={token.symbol ?? ""} />
+        </div>
         <div style={{ flex: 1, minWidth: 280, display: "flex" }}>
           <TokenStatsBar address={address} resolution={chartRes} onResolutionChange={setChartRes} />
         </div>

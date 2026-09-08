@@ -54,7 +54,7 @@ function Column({
         {shown.length === 0 ? (
           <div style={{ color: "#5e6673", fontSize: 12, textAlign: "center", marginTop: 24 }}>{empty}</div>
         ) : (
-          shown.map((t) => <TokenCard key={t.address} t={t} showMultiplier={showMultiplier} />)
+          shown.slice(0, 40).map((tok) => <TokenCard key={tok.address} t={tok} showMultiplier={showMultiplier} />)
         )}
       </div>
     </section>
@@ -67,8 +67,8 @@ export default function DiscoverPage() {
   const { data: tokens } = useQuery({
     queryKey: ["tokens"],
     queryFn: fetchTokens,
-    refetchInterval: 8_000,
-    staleTime: 4_000,
+    refetchInterval: 12_000,
+    staleTime: 8_000,
   });
   const { data: eth } = useQuery({
     queryKey: ["eth-price"],

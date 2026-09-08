@@ -7,6 +7,17 @@ import { apiError } from "@/lib/api";
 const ADDR_OK = /^0x[0-9a-f]{40}$/;
 const LIMIT = 10_000;
 
+/**
+ * Db 是 Postgres|Pglite 联合类型,带字段的 .returning() 在联合上只能命中 0 参
+ * 签名(TS2554)。这里把查询构造器收窄出带参 returning,纯类型层,运行行为不变。
+ */
+type Returnable<Q> = Q & {
+  returning(fields: Record<string, unknown>): Promise<Array<{ address: string }>>;
+};
+function returnable<Q>(q: Q): Returnable<Q> {
+  return q as Returnable<Q>;
+}
+
 function ownerOf(v: unknown): string | null {
   const s = String(v ?? "").trim().toLowerCase();
   return ADDR_OK.test(s) ? s : null;
@@ -93,7 +104,9 @@ export async function POST(req: Request) {
       });
     }
     if (toInsert.length > 0) {
-      const inserted = await db.insert(trackedWallets).values(toInsert).onConflictDoNothing().returning({ address: trackedWallets.address });
+      const inserted = await returnable(
+        db.insert(trackedWallets).values(toInsert).onConflictDoNothing(),
+      ).returning({ address: trackedWallets.address });
       added = inserted.length;
       skipped += toInsert.length - added;
       for (const row of toInsert) {
@@ -134,11 +147,12 @@ export async function PATCH(req: Request) {
     if (body.watching !== undefined) set.watching = body.watching !== false;
     if (body.label !== undefined) set.label = String(body.label ?? "").trim().slice(0, 64) || null;
     if (Object.keys(set).length === 0) return NextResponse.json({ owner, wallets: await listFor(owner) });
-    const updated = await db
-      .update(trackedWallets)
-      .set(set)
-      .where(and(eq(trackedWallets.chainId, CHAIN_ID), eq(trackedWallets.owner, owner), eq(trackedWallets.address, address)))
-      .returning({ address: trackedWallets.address });
+    const updated = await returnable(
+      db
+        .update(trackedWallets)
+        .set(set)
+        .where(and(eq(trackedWallets.chainId, CHAIN_ID), eq(trackedWallets.owner, owner), eq(trackedWallets.address, address))),
+    ).returning({ address: trackedWallets.address });
     if (updated.length === 0) {
       const [{ n }] = await db
         .select({ n: count() })

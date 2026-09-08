@@ -2,7 +2,6 @@
 
 import { apiUrl } from "@/lib/apiBase";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { memo, useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { TokenLogo } from "./TokenLogo";
@@ -195,24 +194,27 @@ function sameSpark(a?: number[], b?: number[]) {
   return a[0] === b[0] && a[a.length - 1] === b[b.length - 1];
 }
 
-function fmtMult(pct: string | null): string | null {
+function multValue(pct: string | null): number | null {
   if (pct == null) return null;
   const v = Number(pct);
   if (!Number.isFinite(v) || v < 0.2) return null;
   const x = 1 + v;
   if (x < 1.2) return null;
+  return x;
+}
+
+function fmtMult(x: number): string {
   return `x${x >= 10 ? x.toFixed(0) : x.toFixed(1)}`.replace(/\.0$/, "");
 }
 
-/** 主页代币小卡片:火花线背景 + Top10/捆绑/钓鱼警告色 + 美元市值 + 社交 logo + hover 预读 */
+/** 主页代币小卡片:火花线背景 + Top10/捆绑/钓鱼警告色 + 美元市值 + 社交 logo;介绍固定 2 行省略号,hover 不改变布局 */
 function TokenCardInner({ t, showMultiplier }: { t: HomeToken; showMultiplier?: boolean }) {
   const [locale] = useLocale();
   const change = fmtChange(t.change24hPct);
+  const xMult = showMultiplier ? multValue(t.change24hPct) : null;
   const progress = t.graduated ? null : Math.min(1, Math.max(0, Number(t.graduationProgress ?? 0)));
   const [fav, setFav] = useState(false);
-  const [hover, setHover] = useState(false);
   const [extra, setExtra] = useState<Partial<HomeToken>>({});
-  const router = useRouter();
   const qc = useQueryClient();
   const { data: eth } = useQuery({ queryKey: ["eth-price"], queryFn: fetchEthPrice, staleTime: 15_000 });
 
@@ -242,12 +244,11 @@ function TokenCardInner({ t, showMultiplier }: { t: HomeToken; showMultiplier?: 
   }, [t.address]);
 
   return (
-    <Link href={`/token/${t.address}`} prefetch style={{ textDecoration: "none", color: "inherit" }}>
+    <Link href={`/token/${t.address}`} prefetch={false} style={{ textDecoration: "none", color: "inherit" }}>
       <div
         className="token-card"
         onMouseEnter={() => {
-          setHover(true);
-          router.prefetch(`/token/${t.address}`);
+          // hover 时补拉链下元数据(介绍/社交);介绍区域高度已固定,填充不会顶动卡片
           const hasMeta = t.description != null || t.website != null || t.twitter != null || t.telegram != null;
           if (hasMeta) return;
           void qc
@@ -260,7 +261,6 @@ function TokenCardInner({ t, showMultiplier }: { t: HomeToken; showMultiplier?: 
               if (d) setExtra(d);
             });
         }}
-        onMouseLeave={() => setHover(false)}
         style={{
           position: "relative",
           border: "1px solid #1e2329",
@@ -276,36 +276,8 @@ function TokenCardInner({ t, showMultiplier }: { t: HomeToken; showMultiplier?: 
           <Sparkline prices={spark} up={sparkUp} id={t.address.slice(2, 10)} />
         </div>
 
-        {showMultiplier && fmtMult(t.change24hPct) && (
-          <span
-            title={tr(locale, "xMultiple")}
-            style={{
-              position: "absolute", top: 4, right: 32, zIndex: 2,
-              fontSize: 16, fontWeight: 800, fontStyle: "italic", color: "#0ecb81",
-              letterSpacing: 0.3, textShadow: "0 1px 6px rgba(0,0,0,0.55)",
-              fontVariantNumeric: "tabular-nums", pointerEvents: "none",
-            }}
-          >
-            {fmtMult(t.change24hPct)}
-          </span>
-        )}
-        <span
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            toggleFavorite(t.address);
-          }}
-          title={fav ? tr(locale, "unfav") : tr(locale, "fav")}
-          style={{
-            position: "absolute", top: 6, right: 8, cursor: "pointer", fontSize: 13, zIndex: 2,
-            color: fav ? "#f0b90b" : "#3d4450", userSelect: "none",
-          }}
-        >
-          {fav ? "★" : "☆"}
-        </span>
-
         <div style={{ position: "relative", zIndex: 1 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
             <TokenLogo src={t.logoUri} alt={t.symbol} size={28} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -331,10 +303,37 @@ function TokenCardInner({ t, showMultiplier }: { t: HomeToken; showMultiplier?: 
                 {nameT || t.name} · {formatTimeAgo(t.createdAt, locale)}
               </div>
             </div>
-            <div style={{ textAlign: "right", paddingRight: 14 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: change.color }}>{change.text}</div>
+            <div style={{ textAlign: "right", flexShrink: 0, minWidth: 56 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: change.color, fontVariantNumeric: "tabular-nums" }}>{change.text}</div>
               <div style={{ fontSize: 11, color: "#848e9c" }}>24h</div>
+              {xMult != null && (
+                <div
+                  title={tr(locale, "xMultiple")}
+                  className={xMult >= 10 ? "mult-gold" : undefined}
+                  style={{
+                    marginTop: 2, fontSize: 18, fontWeight: 800, fontStyle: "italic",
+                    color: xMult >= 10 ? undefined : "#0ecb81",
+                    letterSpacing: 0.2, lineHeight: 1.1, fontVariantNumeric: "tabular-nums",
+                  }}
+                >
+                  {fmtMult(xMult)}
+                </div>
+              )}
             </div>
+            <span
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                toggleFavorite(t.address);
+              }}
+              title={fav ? tr(locale, "unfav") : tr(locale, "fav")}
+              style={{
+                flexShrink: 0, cursor: "pointer", fontSize: 14, lineHeight: 1, width: 16, textAlign: "center",
+                color: fav ? "#f0b90b" : "#3d4450", userSelect: "none", alignSelf: "flex-start",
+              }}
+            >
+              {fav ? "★" : "☆"}
+            </span>
           </div>
 
           {socials.length > 0 && (
@@ -386,20 +385,21 @@ function TokenCardInner({ t, showMultiplier }: { t: HomeToken; showMultiplier?: 
             </div>
           )}
 
-          {hover && (description || skill) && (
-            <div
-              style={{
-                marginTop: 8, paddingTop: 8, borderTop: "1px solid #1e2329",
-                fontSize: 11, color: "#b7bcc5", lineHeight: 1.5,
-                display: "-webkit-box", WebkitLineClamp: 4, WebkitBoxOrient: "vertical", overflow: "hidden",
-              }}
-            >
-              {skill && (
-                <span style={{ color: "#5e8bff", fontWeight: 700, marginRight: 6 }}>{skill}</span>
-              )}
-              {descT || description}
-            </div>
-          )}
+          {/* 介绍区:固定 2 行高度,超长省略号;hover 看全文用原生 tooltip。始终渲染保证卡片高度一致、不跳动;无内容时边框透明但占位相同 */}
+          <div
+            title={(description ?? "") || undefined}
+            style={{
+              marginTop: 8, paddingTop: 8,
+              borderTop: `1px solid ${description || skill ? "#1e2329" : "transparent"}`,
+              fontSize: 11, color: "#b7bcc5", lineHeight: 1.5, height: 33,
+              display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden",
+            }}
+          >
+            {skill && (
+              <span style={{ color: "#5e8bff", fontWeight: 700, marginRight: 6 }}>{skill}</span>
+            )}
+            {descT || description || ""}
+          </div>
         </div>
       </div>
     </Link>

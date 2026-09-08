@@ -6,7 +6,7 @@ import { latestPrices, tokens, trades, wallets } from "@terminal/db";
 import type { ChainConfig } from "@terminal/adapters";
 import { poolIdOf, readPoolSqrtP, snowAbis, snowCurveMath } from "@terminal/adapters";
 import { applyTradeToPosition } from "./pnl.js";
-import { backfillFirstFunder } from "./funding.js";
+import { enqueueFirstFunder } from "./funding.js";
 import { formatPriceEth, shareDecimal } from "./price.js";
 import { applyOffchainMeta } from "./meta.js";
 
@@ -21,6 +21,8 @@ type CurveToken = {
 const BLOCK_CACHE_MAX = 80_000;
 const BLOCK_CACHE_TRIM = 20_000;
 const PREFETCH_CONCURRENCY = 12;
+/** 单笔成交 ETH 上限。超过说明 hop 把另一腿代币数量误当成了 ETH */
+const MAX_TRADE_ETH_WEI = 10n ** 22n;
 
 /**
  * 事件处理器:把链上事件写进数据库。
@@ -180,27 +182,55 @@ export class EventHandlers {
     return row;
   }
 
-  /** Q 计价池:同笔交易里的 ETH/Q hop 的 ETH 数量;买入兜底用 tx.value */
+  /**
+   * Q 计价池:同笔交易里 ETH/Q hop 的 ETH 数量。
+   * 代币↔代币多跳没有 ETH 腿,绝不能把另一池的 token amount0 当成 ETH
+   * (否则 K 线会出现 1e6 ETH / 6 ETH 价这种尖刺,整图被压成一条线)。
+   */
   private async ethFromRouterTx(
     txHash: Hex,
+    token: { curveAddress: string; quoteAsset: string },
     tokenPoolId: string,
     quoteAmount: bigint,
     isBuy: boolean,
   ): Promise<bigint> {
     const tx = await this.loadSwapTx(txHash);
     const pid = tokenPoolId.toLowerCase();
-    const others = tx.swaps.filter((s) => s.id !== pid);
-    const matched = others.find((s) => {
-      const q = s.amount1 < 0n ? -s.amount1 : s.amount1;
+    const hops = tx.swaps.filter((s) => s.id !== pid);
+
+    let ethQId: string | null = null;
+    const meta = await this.loadQuoteMeta(token.curveAddress);
+    if (meta && meta.quote !== zeroAddress) {
+      ethQId = poolIdOf({
+        currency0: zeroAddress,
+        currency1: meta.quote,
+        fee: meta.fee,
+        tickSpacing: meta.spacing,
+        hooks: zeroAddress,
+      }).toLowerCase();
+    }
+
+    const abs = (n: bigint) => (n < 0n ? -n : n);
+    const looksLikeEthQ = (s: { id: string; amount0: bigint; amount1: bigint }) => {
+      if (ethQId) return s.id === ethQId;
+      const eth = abs(s.amount0);
+      const q = abs(s.amount1);
+      if (eth === 0n || eth > MAX_TRADE_ETH_WEI) return false;
       const d = q > quoteAmount ? q - quoteAmount : quoteAmount - q;
       return quoteAmount === 0n ? q > 0n : d * 10n <= quoteAmount;
-    }) ?? others[0];
-    if (matched) {
-      const eth = matched.amount0 < 0n ? -matched.amount0 : matched.amount0;
-      if (eth > 0n) return eth;
-      if (matched.sqrtP > 0n) return snowCurveMath.quoteToEthAtSpot(matched.sqrtP, quoteAmount);
+    };
+
+    const ethHop = (ethQId ? hops.find((s) => s.id === ethQId) : undefined) ?? hops.find(looksLikeEthQ);
+    if (ethHop) {
+      const eth = abs(ethHop.amount0);
+      if (eth > 0n && eth <= MAX_TRADE_ETH_WEI) return eth;
+      if (ethHop.sqrtP > 0n) {
+        const conv = snowCurveMath.quoteToEthAtSpot(ethHop.sqrtP, quoteAmount);
+        if (conv > 0n && conv <= MAX_TRADE_ETH_WEI) return conv;
+      }
     }
-    if (isBuy && tx.value > 0n) return tx.value;
+    // 仅单 hop 买入可用 tx.value;代币↔代币多跳绝不能拿另一腿当 ETH
+    if (isBuy && hops.length === 0 && tx.value > 0n && tx.value <= MAX_TRADE_ETH_WEI) return tx.value;
     return 0n;
   }
 
@@ -240,6 +270,9 @@ export class EventHandlers {
     ts: Date,
     graduationProgress: string | null,
   ) {
+    const n = Number(priceEth);
+    // 6 ETH / 1e-16 这种脏价不写 latest_prices,否则顶栏市值/涨跌/池子全坏
+    if (!Number.isFinite(n) || n <= 1e-14 || n >= 0.01) return;
     await this.db
       .insert(latestPrices)
       .values({
@@ -373,7 +406,7 @@ export class EventHandlers {
       graduationThreshold: threshold.toString(),
       graduated: false,
     });
-    void backfillFirstFunder(this.db, this.client, this.cfg.chainId, a.creator);
+    enqueueFirstFunder(this.db, this.client, this.cfg.chainId, a.creator);
     void applyOffchainMeta(this.db, this.cfg.chainId, a.token).catch((e) =>
       console.error(`[meta] ${a.token}`, e),
     );
@@ -418,7 +451,7 @@ export class EventHandlers {
       chainId: this.cfg.chainId, wallet: trader, token: token.address,
       isBuy, tokenAmount, ethAmount, blockTimestamp: ts,
     });
-    void backfillFirstFunder(this.db, this.client, this.cfg.chainId, trader);
+    enqueueFirstFunder(this.db, this.client, this.cfg.chainId, trader);
 
     this.publish(`price:${this.cfg.chainId}:${token.address}`, {
       priceEth: priceStr,
@@ -566,11 +599,21 @@ export class EventHandlers {
     const txHash = log.transactionHash!;
     let ethAmount = quoteAmount;
     if (quote !== zeroAddress) {
-      ethAmount = await this.ethFromRouterTx(txHash as Hex, poolId, quoteAmount, isBuy);
-      if (ethAmount === 0n) {
-        ethAmount = await this.quoteLegToEth(token, quoteAmount);
+      const fromHop = await this.ethFromRouterTx(txHash as Hex, token, poolId, quoteAmount, isBuy);
+      const fromSpot = await this.quoteLegToEth(token, quoteAmount);
+      if (fromHop > 0n && fromHop <= MAX_TRADE_ETH_WEI) {
+        if (fromSpot > 0n) {
+          const ratio = fromHop > fromSpot ? fromHop / fromSpot : fromSpot / fromHop;
+          // hop 与 spot 差 1 万倍以上 = 把另一腿代币/粉尘 wei 当成了 ETH
+          ethAmount = ratio > 10_000n ? fromSpot : fromHop;
+        } else {
+          ethAmount = fromHop;
+        }
+      } else {
+        ethAmount = fromSpot;
       }
     }
+    if (ethAmount > MAX_TRADE_ETH_WEI) ethAmount = 0n;
     const priceStr = ethAmount > 0n ? formatPriceEth(ethAmount, tokenAmount) : "0";
     let trader = this.txFromCache.get(txHash);
     if (!trader) {
@@ -596,6 +639,7 @@ export class EventHandlers {
       blockTimestamp: ts,
     }).onConflictDoNothing().returning();
     if (inserted.length === 0) return;
+    enqueueFirstFunder(this.db, this.client, this.cfg.chainId, trader);
 
     if (ethAmount > 0n) {
       await applyTradeToPosition(this.db, {

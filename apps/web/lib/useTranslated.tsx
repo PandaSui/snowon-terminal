@@ -9,10 +9,12 @@ import { useLocale } from "@/lib/locale";
 export function useTranslatedTexts(texts: string[]): string[] {
   const [locale] = useLocale();
   const cleaned = texts.map((s) => (s ?? "").trim());
+  const need = locale !== "zh" && cleaned.some(Boolean);
   const { data } = useQuery({
     queryKey: ["translate", locale, cleaned],
-    enabled: cleaned.some(Boolean),
+    enabled: need,
     staleTime: 30 * 60_000,
+    retry: false,
     queryFn: async () => {
       const res = await fetch(apiUrl("/api/translate"), {
         method: "POST",

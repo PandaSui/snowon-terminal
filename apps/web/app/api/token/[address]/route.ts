@@ -57,17 +57,18 @@ export async function GET(_req: Request, { params }: { params: Promise<{ address
           count(*) FILTER (
             WHERE kind IN ('buy', 'sell') AND block_timestamp >= now() - interval '24 hours'
           )::int AS "heat24h",
-          coalesce(sum(eth_amount) FILTER (WHERE is_buy AND kind IN ('buy', 'sell')), 0)::text AS "buyVol",
-          coalesce(sum(eth_amount) FILTER (WHERE NOT is_buy AND kind IN ('buy', 'sell')), 0)::text AS "sellVol",
+          coalesce(sum(eth_amount) FILTER (WHERE is_buy AND kind IN ('buy', 'sell') AND price_eth > 1e-14 AND price_eth < 0.01 AND eth_amount::numeric < 1e22), 0)::text AS "buyVol",
+          coalesce(sum(eth_amount) FILTER (WHERE NOT is_buy AND kind IN ('buy', 'sell') AND price_eth > 1e-14 AND price_eth < 0.01 AND eth_amount::numeric < 1e22), 0)::text AS "sellVol",
           count(*) FILTER (WHERE kind IN ('buy', 'sell'))::int AS "tradeCount",
           (
             SELECT lp.price_eth::text FROM latest_prices lp
             WHERE lp.chain_id = ${CHAIN_ID} AND lp.token_address = ${addr}
+              AND lp.price_eth > 1e-14 AND lp.price_eth < 0.01
           ) AS "livePriceEth",
           (
             SELECT tr.price_eth::text FROM trades tr
             WHERE tr.chain_id = ${CHAIN_ID} AND tr.token_address = ${addr}
-              AND tr.kind IN ('buy', 'sell') AND tr.price_eth > 0
+              AND tr.kind IN ('buy', 'sell') AND tr.price_eth > 1e-14 AND tr.price_eth < 0.01
             ORDER BY tr.block_timestamp DESC LIMIT 1
           ) AS "lastPriceEth"
         FROM trades

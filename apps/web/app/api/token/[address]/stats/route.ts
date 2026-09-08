@@ -70,6 +70,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ address
       FROM trades
       WHERE chain_id = ${CHAIN_ID}
         AND token_address = ${address.toLowerCase()}
+        AND kind IN ('buy', 'sell')
+        AND price_eth > 1e-14 AND price_eth < 0.01
+        AND eth_amount::numeric < 1e22
         AND block_timestamp >= now() - interval '24 hours'
     `);
     const row = asRows<Record<string, unknown>>(res)[0] ?? {};

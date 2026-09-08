@@ -10,7 +10,7 @@ import { useT } from "@/lib/locale";
 import { EmojiAvatar } from "./EmojiAvatar";
 
 const CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? 4663);
-const COL = "22px minmax(108px,1.3fr) 64px 78px 72px 78px minmax(88px,1fr)";
+const COL = "22px minmax(148px,1.5fr) 64px 78px 72px 78px minmax(88px,1fr)";
 
 interface Holder {
   wallet: string;
@@ -377,9 +377,12 @@ export function HoldersPanel({ address, embedded, ethUsd }: { address: string; e
         {holders.map((h, i) => {
           const pnl = fmtSignedUsd(h.totalPnlEth ?? h.unrealizedPnlEth, ethUsd);
           const pct = h.pnlPct == null ? null : Number(h.pnlPct) * 100;
+          const funderAddr = h.firstFunder ? shortAddr(h.firstFunder) : null;
           const clusterTip = h.sameFunder
-            ? tr("sameFunderN", { n: h.clusterSize, src: h.firstFunder ? shortAddr(h.firstFunder) : "?" })
-            : undefined;
+            ? tr("sameFunderN", { n: h.clusterSize, src: funderAddr ?? "?" })
+            : h.firstFunder
+              ? tr("fundedBy", { addr: funderAddr ?? "" })
+              : undefined;
           const created = ageLabel(h.firstSeenAt);
           const active = ageLabel(h.lastSeenAt);
           return (
@@ -400,32 +403,46 @@ export function HoldersPanel({ address, embedded, ethUsd }: { address: string; e
               <span style={{ color: i < 3 ? "#f0b90b" : "#5e6673", fontWeight: 700, fontSize: 11 }}>{i + 1}</span>
               <span style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0 }}>
                 <EmojiAvatar seed={h.wallet} size={16} />
-                <Link
-                  href={`/profile?address=${h.wallet}`}
-                  style={{ fontFamily: "monospace", color: "#eaecef", textDecoration: "none" }}
-                  title={`${h.wallet} · ${tr("clickProfile")}`}
-                >
-                  {shortAddr(h.wallet)}
-                </Link>
-                <a
-                  href={addressUrl(CHAIN_ID, h.wallet)}
-                  target="_blank"
-                  rel="noreferrer"
-                  title={tr("openExplorer")}
-                  style={{ color: "#3d4450", textDecoration: "none", fontSize: 10, flexShrink: 0 }}
-                >
-                  ↗
-                </a>
-                {h.isDev && <DevMark />}
-                {h.isDevAlt && <DevMark alt />}
-                {h.isPhish && <RiskMark kind="phish" title={tr("phishMix")} />}
-                {h.isBundle && <RiskMark kind="bundle" title={clusterTip ?? tr("bundleWallet")} />}
-                {(created || active) && (
-                  <span style={{ color: "#5e6673", fontSize: 10, whiteSpace: "nowrap" }}>
-                    {created ?? "—"}
-                    {active ? ` · ${active}` : ""}
+                <span style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 1 }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0 }}>
+                    <Link
+                      href={`/profile?address=${h.wallet}`}
+                      style={{ fontFamily: "monospace", color: "#eaecef", textDecoration: "none" }}
+                      title={`${h.wallet} · ${tr("clickProfile")}`}
+                    >
+                      {shortAddr(h.wallet)}
+                    </Link>
+                    <a
+                      href={addressUrl(CHAIN_ID, h.wallet)}
+                      target="_blank"
+                      rel="noreferrer"
+                      title={tr("openExplorer")}
+                      style={{ color: "#3d4450", textDecoration: "none", fontSize: 10, flexShrink: 0 }}
+                    >
+                      ↗
+                    </a>
+                    {h.isDev && <DevMark />}
+                    {h.isDevAlt && <DevMark alt />}
+                    {h.isPhish && <RiskMark kind="phish" title={tr("phishMix")} />}
+                    {h.isBundle && <RiskMark kind="bundle" title={clusterTip ?? tr("bundleWallet")} />}
+                    {(created || active) && (
+                      <span style={{ color: "#5e6673", fontSize: 10, whiteSpace: "nowrap" }}>
+                        {created ?? "—"}
+                        {active ? ` · ${active}` : ""}
+                      </span>
+                    )}
                   </span>
-                )}
+                  {h.firstFunder ? (
+                    <Link
+                      href={`/profile?address=${h.firstFunder}`}
+                      title={h.firstFunder}
+                      style={{ fontSize: 10, color: h.sameFunder ? "#f6465d" : "#848e9c", textDecoration: "none", fontFamily: "monospace" }}
+                    >
+                      {tr("fundedBy", { addr: funderAddr ?? "" })}
+                      {h.funderLabel ? ` · ${h.funderLabel}` : ""}
+                    </Link>
+                  ) : null}
+                </span>
               </span>
               <span style={{ textAlign: "right", color: "#eaecef", fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>
                 {fmtPct(h.sharePct)}
