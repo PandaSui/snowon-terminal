@@ -116,7 +116,6 @@ export function TradingChart({
   const volRef = useRef<ReturnType<IChartApi["addSeries"]> | null>(null);
   const [internalRes, setInternalRes] = useState<ChartResolution>("5");
   const [empty, setEmpty] = useState(false);
-  const [chartReady, setChartReady] = useState(false);
   const tr = useT();
   const resolution = (resProp ?? internalRes) as ChartResolution;
 
@@ -186,7 +185,6 @@ export function TradingChart({
     chartRef.current = chart;
     seriesRef.current = candles;
     volRef.current = volume;
-    setChartReady(true);
     const ro = new ResizeObserver(() => {
       const node = containerRef.current;
       const api = chartRef.current;
@@ -199,7 +197,6 @@ export function TradingChart({
     ro.observe(el);
     return () => {
       ro.disconnect();
-      setChartReady(false);
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
@@ -283,12 +280,19 @@ export function TradingChart({
   }, [showVol]);
 
   useEffect(() => {
-    if (!rateReady || !chartReady) return;
+    if (!rateReady) return;
     let cancelled = false;
     const symbol = `${chainId}:${String(tokenAddress).toLowerCase()}`;
     const res = RES_SECONDS[resolution] ?? 300;
     lastBarRef.current = null;
     fittedRef.current = false;
+
+    async function waitSeries() {
+      for (let i = 0; i < 120 && !cancelled && !seriesRef.current; i++) {
+        await new Promise<void>((r) => requestAnimationFrame(() => r()));
+      }
+      return seriesRef.current;
+    }
 
     async function load() {
       const to = Math.floor(Date.now() / 1000);
@@ -297,10 +301,11 @@ export function TradingChart({
       try {
         const r = await fetch(apiUrl(`/api/udf/history?symbol=${symbol}&resolution=${resolution}&from=${from}&to=${to}`));
         const d = await readJson<UdfHistory>(r);
-        if (cancelled || !seriesRef.current) return;
+        const series = await waitSeries();
+        if (cancelled || !series) return;
         if (d.s !== "ok" || !d.t?.length) {
           setEmpty(true);
-          seriesRef.current.setData([]);
+          series.setData([]);
           volRef.current?.setData([]);
           barsRef.current = [];
           lastBarRef.current = null;
@@ -318,7 +323,7 @@ export function TradingChart({
         const bars = sanitizeBars(raw);
         if (!bars.length) {
           setEmpty(true);
-          seriesRef.current.setData([]);
+          series.setData([]);
           volRef.current?.setData([]);
           barsRef.current = [];
           lastBarRef.current = null;
@@ -329,7 +334,7 @@ export function TradingChart({
         barsRef.current = bars;
         const keep = new Set(bars.map((b) => b.time));
         try {
-          seriesRef.current.setData(bars);
+          series.setData(bars);
           volRef.current?.setData(
             d.t.flatMap((t, i) => {
               const time = (t + TZ_OFFSET) as UTCTimestamp;
@@ -398,7 +403,8 @@ export function TradingChart({
       off();
     };
     // rateReady 仅表达"汇率是否就位",数值本身的变化(15s 刷新)不触发重载
-  }, [chainId, tokenAddress, resolution, unit, rateReady, chartReady]);
+    // 不依赖 chartReady:K 线请求与图表初始化并行,series 未就绪时 waitSeries 再落数据
+  }, [chainId, tokenAddress, resolution, unit, rateReady]);
 
   // USD 模式下价格数量级变大,降低精度避免一堆尾零
   useEffect(() => {

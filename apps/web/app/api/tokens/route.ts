@@ -44,6 +44,7 @@ export async function GET() {
         SELECT
           t.address,
           t.creator,
+          t.platform_id    AS "platformId",
           t.name,
           t.symbol,
           t.logo_uri       AS "logoUri",
@@ -107,8 +108,19 @@ export async function GET() {
           LIMIT 1
         ) base ON true
         WHERE t.chain_id = ${CHAIN_ID}
+          AND t.address IN (
+            SELECT address FROM (
+              SELECT address,
+                row_number() OVER (
+                  PARTITION BY CASE WHEN platform_id = 'pons' THEN 'pons' ELSE 'snowon' END
+                  ORDER BY created_at DESC
+                ) AS rn
+              FROM tokens
+              WHERE chain_id = ${CHAIN_ID}
+            ) pick
+            WHERE rn <= 200
+          )
         ORDER BY t.created_at DESC
-        LIMIT 200
       ),
       pos AS (
         SELECT p.token_address, p.wallet, p.balance AS bal

@@ -167,7 +167,8 @@ async function readOnchain(
   }
 }
 
-/** 持有者 Top100 + 流动池 + 成本/盈亏 + 同资金来源簇 + 钓鱼/捆绑标记 + 销毁地址 */
+/** 持有者(买入+转入,按余额) + 流动池 + 成本/盈亏 + 同资金来源簇 + 钓鱼/捆绑标记 + 销毁地址 */
+const HOLDER_LIST_CAP = 1000;
 export async function GET(_req: Request, { params }: { params: Promise<{ address: string }> }) {
   try {
     const { address } = await params;
@@ -245,7 +246,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ address
           coalesce(c.n, 0)::int AS "clusterSize"
         FROM ranked r
         LEFT JOIN clusters c ON c.first_funder = r.first_funder
-        WHERE r.rn <= 100
+        WHERE r.rn <= ${HOLDER_LIST_CAP}
         ORDER BY r.rn
       `),
       db.execute(sql`
@@ -356,6 +357,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ address
     const skip = new Set(BURN_SET);
     if (tok?.curveAddress) skip.add(tok.curveAddress.toLowerCase());
     if (cfg?.poolManager) skip.add(cfg.poolManager.toLowerCase());
+    if (cfg?.swapRouter) skip.add(cfg.swapRouter.toLowerCase());
+    if (cfg?.hook) skip.add(cfg.hook.toLowerCase());
+    if (cfg?.factory) skip.add(cfg.factory.toLowerCase());
 
     const priceEth = rawHolders.find((h) => h.priceEth != null)?.priceEth ?? null;
     const priceN = priceEth == null ? null : Number(priceEth);
@@ -392,7 +396,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ address
 
     const holders = rawHolders
       .filter((h) => !skip.has(h.wallet.toLowerCase()))
-      .slice(0, 100)
+      .slice(0, HOLDER_LIST_CAP)
       .map((h) => {
         const bal = toWei(h.balanceRaw);
         const labels = parseLabels(h.labels);

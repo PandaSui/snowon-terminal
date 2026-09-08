@@ -1,11 +1,11 @@
 import type { Address, Hex, Log, PublicClient } from "viem";
 import { parseEventLogs, zeroAddress } from "viem";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, inArray } from "drizzle-orm";
 import type { Db } from "@terminal/db";
 import { latestPrices, tokens, trades, wallets } from "@terminal/db";
 import type { ChainConfig } from "@terminal/adapters";
-import { poolIdOf, readPoolSqrtP, snowAbis, snowCurveMath } from "@terminal/adapters";
-import { applyTradeToPosition } from "./pnl.js";
+import { poolIdOf, ponsAbis, readPoolSqrtP, snowAbis, snowCurveMath } from "@terminal/adapters";
+import { applyTradeToPosition, applyTransferToPosition } from "./pnl.js";
 import { enqueueFirstFunder } from "./funding.js";
 import { formatPriceEth, shareDecimal } from "./price.js";
 import { applyOffchainMeta } from "./meta.js";
@@ -23,6 +23,9 @@ const BLOCK_CACHE_TRIM = 20_000;
 const PREFETCH_CONCURRENCY = 12;
 /** 单笔成交 ETH 上限。超过说明 hop 把另一腿代币数量误当成了 ETH */
 const MAX_TRADE_ETH_WEI = 10n ** 22n;
+const DEAD = "0x000000000000000000000000000000000000dead";
+/** 同一笔 Transfer 拆成转出/转入两行时,转入行用 logIndex + 该偏移,避免主键冲突 */
+const TRANSFER_IN_LOG_OFFSET = 1_000_000;
 
 /**
  * 事件处理器:把链上事件写进数据库。
@@ -36,6 +39,8 @@ export class EventHandlers {
   private readonly tokenByPool = new Map<string, (typeof tokens.$inferSelect)>();
   private readonly unknownCurves = new Set<string>();
   private readonly unknownPools = new Set<string>();
+  private readonly tokenMeta = new Map<string, { curveAddress: string; graduated: boolean }>();
+  private readonly unknownTokens = new Set<string>();
   /** 曲线买入累计 quote,避免每笔 SUM(trades) */
   private readonly quoteBought = new Map<string, bigint>();
   private readonly txFromCache = new Map<string, string>();
@@ -53,6 +58,7 @@ export class EventHandlers {
     private readonly cfg: ChainConfig,
     /** Redis 发布器:把实时价格推给 web 层(K线 subscribeBars / 榜单) */
     private readonly publish: (channel: string, payload: unknown) => void,
+    private readonly pons?: { factory: Address; hook: Address },
   ) {}
 
   private cacheBlockTime(blockNumber: bigint, ts: Date) {
@@ -314,6 +320,27 @@ export class EventHandlers {
     return token;
   }
 
+  private async lookupTokenMeta(tokenAddr: string): Promise<{ curveAddress: string; graduated: boolean } | null> {
+    const cached = this.tokenMeta.get(tokenAddr);
+    if (cached) return cached;
+    if (this.unknownTokens.has(tokenAddr)) return null;
+    const [row] = await this.db
+      .select({
+        curveAddress: tokens.curveAddress,
+        graduated: tokens.graduated,
+      })
+      .from(tokens)
+      .where(and(eq(tokens.chainId, this.cfg.chainId), eq(tokens.address, tokenAddr)))
+      .limit(1);
+    if (!row) {
+      this.unknownTokens.add(tokenAddr);
+      return null;
+    }
+    const meta = { curveAddress: row.curveAddress.toLowerCase(), graduated: row.graduated };
+    this.tokenMeta.set(tokenAddr, meta);
+    return meta;
+  }
+
   private async curveProgress(
     tokenAddress: string,
     threshold: string | null,
@@ -406,6 +433,11 @@ export class EventHandlers {
       graduationThreshold: threshold.toString(),
       graduated: false,
     });
+    this.tokenMeta.set(a.token.toLowerCase(), {
+      curveAddress: a.curve.toLowerCase(),
+      graduated: false,
+    });
+    this.unknownTokens.delete(a.token.toLowerCase());
     enqueueFirstFunder(this.db, this.client, this.cfg.chainId, a.creator);
     void applyOffchainMeta(this.db, this.cfg.chainId, a.token).catch((e) =>
       console.error(`[meta] ${a.token}`, e),
@@ -500,6 +532,8 @@ export class EventHandlers {
       tokAddr = tok?.address;
     }
     if (tokAddr) {
+      const meta = this.tokenMeta.get(tokAddr);
+      if (meta) meta.graduated = true;
       await this.db
         .update(latestPrices)
         .set({ graduationProgress: null, updatedAt: ts })
@@ -699,5 +733,280 @@ export class EventHandlers {
       blockNumber: log.blockNumber!,
       blockTimestamp: ts,
     }).onConflictDoNothing();
+  }
+
+  /**
+   * ERC20 Transfer:钱包互转记为 kind=out / in,并滚动持仓。
+   * 曲线/池子/铸造相关 Transfer 已由 Buy/Sell/Swap/Graduated 记账,这里跳过以免双计。
+   */
+  async onTokenTransfer(log: Log & { args: LogArgs }) {
+    const a = log.args as unknown as { from: Address; to: Address; value: bigint };
+    const value = a.value ?? 0n;
+    const from = (a.from ?? zeroAddress).toLowerCase();
+    const to = (a.to ?? zeroAddress).toLowerCase();
+    if (value === 0n || from === to) return;
+
+    const tokenAddr = log.address.toLowerCase();
+    const meta = await this.lookupTokenMeta(tokenAddr);
+    if (!meta) return;
+
+    const burnSet = new Set([zeroAddress.toLowerCase(), DEAD]);
+    const protocol = new Set<string>([
+      meta.curveAddress,
+      this.cfg.poolManager.toLowerCase(),
+      this.cfg.swapRouter.toLowerCase(),
+      this.cfg.hook.toLowerCase(),
+      this.cfg.factory.toLowerCase(),
+    ]);
+    if (this.pons) {
+      protocol.add(this.pons.factory.toLowerCase());
+      protocol.add(this.pons.hook.toLowerCase());
+    }
+    if (protocol.has(from) || protocol.has(to)) return;
+    if (burnSet.has(from)) return;
+
+    const txHash = log.transactionHash!;
+    const [tradeHit] = await this.db
+      .select({ kind: trades.kind })
+      .from(trades)
+      .where(
+        and(
+          eq(trades.chainId, this.cfg.chainId),
+          eq(trades.txHash, txHash),
+          eq(trades.tokenAddress, tokenAddr),
+          inArray(trades.kind, ["buy", "sell", "add", "remove"]),
+        ),
+      )
+      .limit(1);
+    if (tradeHit) return;
+
+    const ts = await this.blockTime(log.blockNumber!);
+    const phase = meta.graduated ? "pool" : "curve";
+    const logIndex = log.logIndex ?? 0;
+
+    const writeLeg = async (trader: string, isIn: boolean, idx: number) => {
+      const inserted = await this.db.insert(trades).values({
+        chainId: this.cfg.chainId,
+        txHash,
+        logIndex: idx,
+        tokenAddress: tokenAddr,
+        trader,
+        isBuy: isIn,
+        ethAmount: "0",
+        quoteAmount: "0",
+        tokenAmount: value.toString(),
+        priceEth: "0",
+        phase,
+        kind: isIn ? "in" : "out",
+        blockNumber: log.blockNumber!,
+        blockTimestamp: ts,
+      }).onConflictDoNothing().returning();
+      if (inserted.length === 0) return;
+      await applyTransferToPosition(this.db, {
+        chainId: this.cfg.chainId,
+        wallet: trader,
+        token: tokenAddr,
+        isIn,
+        tokenAmount: value,
+        blockTimestamp: ts,
+      });
+      enqueueFirstFunder(this.db, this.client, this.cfg.chainId, trader);
+    };
+
+    await writeLeg(from, false, logIndex);
+    if (!burnSet.has(to)) {
+      await writeLeg(to, true, logIndex + TRANSFER_IN_LOG_OFFSET);
+    }
+  }
+
+  /** Pons V2 TokenLaunched → tokens(platformId=pons) */
+  async onPonsLaunched(log: Log & { args: LogArgs }): Promise<{ token: Address; curve: Address } | null> {
+    if (!this.pons) return null;
+    const a = log.args as unknown as {
+      token: Address; curve: Address; deployer: Address; pairToken: Address; graduationThreshold: bigint;
+    };
+    const token = a.token.toLowerCase() as Address;
+    const curve = a.curve.toLowerCase() as Address;
+    const ts = await this.blockTime(log.blockNumber!);
+    const pair = (a.pairToken ?? zeroAddress).toLowerCase() as Address;
+
+    let name = "Token";
+    let symbol = "TKN";
+    let logoUri: string | null = null;
+    let description: string | null = null;
+    let twitter: string | null = null;
+    let telegram: string | null = null;
+    let website: string | null = null;
+    let feeReceiver = a.deployer.toLowerCase();
+    let taxBps = 0;
+    let phantom = 0n;
+    let quoteDecimals = 18;
+    try {
+      const [nm, sy, logo, desc, phantomQ, tax, launch] = await Promise.all([
+        this.client.readContract({ address: token, abi: ponsAbis.ponsTokenAbi, functionName: "name" }).catch(() => "Token"),
+        this.client.readContract({ address: token, abi: ponsAbis.ponsTokenAbi, functionName: "symbol" }).catch(() => "TKN"),
+        this.client.readContract({ address: token, abi: ponsAbis.ponsTokenAbi, functionName: "logo" }).catch(() => ""),
+        this.client.readContract({ address: token, abi: ponsAbis.ponsTokenAbi, functionName: "description" }).catch(() => ""),
+        this.client.readContract({ address: curve, abi: ponsAbis.ponsCurveAbi, functionName: "phantomQuote" }).catch(() => 0n),
+        this.client.readContract({ address: curve, abi: ponsAbis.ponsCurveAbi, functionName: "creatorTaxBps" }).catch(() => 0n),
+        this.client.readContract({ address: this.pons.factory, abi: ponsAbis.ponsFactoryAbi, functionName: "getLaunchedToken", args: [token] }).catch(() => null),
+      ]);
+      name = String(nm || "Token");
+      symbol = String(sy || "TKN");
+      logoUri = logo ? String(logo) : null;
+      description = desc ? String(desc) : null;
+      phantom = typeof phantomQ === "bigint" ? phantomQ : 0n;
+      taxBps = Number(tax ?? 0);
+      if (launch && launch.exists) feeReceiver = (launch.creatorFeeRecipient || a.deployer).toLowerCase();
+      if (pair !== zeroAddress) {
+        const d = await this.client.readContract({ address: pair, abi: ponsAbis.ponsTokenAbi, functionName: "decimals" }).catch(() => 18);
+        quoteDecimals = Number(d ?? 18);
+      }
+      const socials = await this.client.readContract({ address: token, abi: ponsAbis.ponsTokenAbi, functionName: "socials" }).catch(() => null);
+      if (socials) {
+        twitter = socials.twitter || null;
+        telegram = socials.telegram || null;
+        website = socials.website || null;
+      }
+    } catch (e) {
+      console.error(`[pons] meta ${token}`, e);
+    }
+
+    await this.db.insert(tokens).values({
+      chainId: this.cfg.chainId,
+      address: token,
+      platformId: "pons",
+      curveAddress: curve,
+      creator: a.deployer.toLowerCase(),
+      feeReceiver,
+      name,
+      symbol,
+      logoUri,
+      description,
+      twitter,
+      telegram,
+      website,
+      quoteAsset: pair,
+      quoteDecimals,
+      buyTaxBps: taxBps,
+      sellTaxBps: taxBps,
+      antiSnipe: true,
+      antiBundle: false,
+      curveP0: phantom.toString(),
+      curveSlope: "0",
+      graduationThreshold: (a.graduationThreshold ?? 0n).toString(),
+      createdAtBlock: log.blockNumber!,
+      createdAt: ts,
+      createdTx: log.transactionHash!,
+    }).onConflictDoNothing();
+
+    this.rememberCurveToken(curve, {
+      address: token,
+      graduationThreshold: (a.graduationThreshold ?? 0n).toString(),
+      graduated: false,
+    });
+    this.tokenMeta.set(token, { curveAddress: curve, graduated: false });
+    enqueueFirstFunder(this.db, this.client, this.cfg.chainId, a.deployer);
+    return { token, curve };
+  }
+
+  async onPonsCurveTrade(log: Log & { args: LogArgs }, isBuy: boolean) {
+    const a = log.args as unknown as {
+      buyer?: Address; seller?: Address; recipient?: Address;
+      quoteIn?: bigint; tokensOut?: bigint; tokensIn?: bigint; quoteOut?: bigint;
+    };
+    const curveAddr = log.address.toLowerCase();
+    const token = await this.lookupByCurve(curveAddr);
+    if (!token) return;
+    const trader = (isBuy ? a.buyer! : a.seller!).toLowerCase();
+    const quoteAmount = isBuy ? a.quoteIn! : a.quoteOut!;
+    const tokenAmount = isBuy ? a.tokensOut! : a.tokensIn!;
+    if (tokenAmount === 0n) return;
+    const ts = await this.blockTime(log.blockNumber!);
+    const [tokRow] = await this.db
+      .select({ quoteAsset: tokens.quoteAsset })
+      .from(tokens)
+      .where(and(eq(tokens.chainId, this.cfg.chainId), eq(tokens.address, token.address)))
+      .limit(1);
+    const native = !tokRow?.quoteAsset || tokRow.quoteAsset === zeroAddress;
+    const ethAmount = native ? quoteAmount : 0n;
+    const priceStr = ethAmount > 0n ? formatPriceEth(ethAmount, tokenAmount) : "0";
+
+    const inserted = await this.db.insert(trades).values({
+      chainId: this.cfg.chainId,
+      txHash: log.transactionHash!,
+      logIndex: log.logIndex!,
+      tokenAddress: token.address,
+      trader,
+      isBuy,
+      ethAmount: ethAmount.toString(),
+      quoteAmount: quoteAmount.toString(),
+      tokenAmount: tokenAmount.toString(),
+      priceEth: priceStr,
+      phase: "curve",
+      kind: isBuy ? "buy" : "sell",
+      blockNumber: log.blockNumber!,
+      blockTimestamp: ts,
+    }).onConflictDoNothing().returning();
+    if (inserted.length === 0) return;
+
+    if (ethAmount > 0n) {
+      await applyTradeToPosition(this.db, {
+        chainId: this.cfg.chainId, wallet: trader, token: token.address,
+        isBuy, tokenAmount, ethAmount, blockTimestamp: ts,
+      });
+    }
+    enqueueFirstFunder(this.db, this.client, this.cfg.chainId, trader);
+    if (ethAmount > 0n) {
+      this.publish(`price:${this.cfg.chainId}:${token.address}`, {
+        priceEth: priceStr, isBuy, ethAmount: ethAmount.toString(), tokenAmount: tokenAmount.toString(),
+        ts: ts.toISOString(), phase: "curve",
+      });
+      const progress = token.graduated
+        ? null
+        : await this.curveProgress(token.address, token.graduationThreshold, isBuy ? quoteAmount : 0n);
+      await this.upsertLatestPrice(token.address, priceStr, ts, progress);
+    }
+  }
+
+  async onPonsPoolGraduated(log: Log & { args: LogArgs }): Promise<string | null> {
+    if (!this.pons) return null;
+    const a = log.args as unknown as { token: Address; tokenAmount?: bigint; pairTokenAmount?: bigint };
+    const tokenAddr = a.token.toLowerCase();
+    const ts = await this.blockTime(log.blockNumber!);
+    const launch = await this.client.readContract({
+      address: this.pons.factory,
+      abi: ponsAbis.ponsFactoryAbi,
+      functionName: "getLaunchedToken",
+      args: [tokenAddr as Address],
+    }).catch(() => null);
+    const pair = (launch?.pairToken ?? zeroAddress).toLowerCase() as Address;
+    const token = tokenAddr as Address;
+    const c0 = token.toLowerCase() < pair ? token : pair;
+    const c1 = token.toLowerCase() < pair ? pair : token;
+    const poolId = poolIdOf({
+      currency0: c0,
+      currency1: c1,
+      fee: Number(launch?.poolFee ?? 0),
+      tickSpacing: Number(launch?.tickSpacing ?? 200),
+      hooks: this.pons.hook,
+    });
+    await this.db.update(tokens).set({
+      graduated: true,
+      graduatedAt: ts,
+      poolId,
+      lpTokenWei: (a.tokenAmount ?? 0n).toString(),
+      lpQuoteWei: (a.pairTokenAmount ?? 0n).toString(),
+      lpLockedForever: true,
+    }).where(and(eq(tokens.chainId, this.cfg.chainId), eq(tokens.address, tokenAddr)));
+    const cached = this.tokenByCurve.get((launch?.curve ?? "").toLowerCase());
+    if (cached) cached.graduated = true;
+    const meta = this.tokenMeta.get(tokenAddr);
+    if (meta) meta.graduated = true;
+    await this.db.update(latestPrices).set({ graduationProgress: null, updatedAt: ts })
+      .where(and(eq(latestPrices.chainId, this.cfg.chainId), eq(latestPrices.tokenAddress, tokenAddr)));
+    this.unknownPools.delete(poolId);
+    this.publish(`graduated:${this.cfg.chainId}`, { token: tokenAddr, poolId, platform: "pons" });
+    return poolId;
   }
 }

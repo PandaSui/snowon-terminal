@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { createPublicClient, http, zeroAddress, type Address, type Chain } from "viem";
-import { snowAbis } from "@terminal/adapters";
-import { chainConfigs } from "@terminal/db";
+import { DEFAULT_PONS_DEPLOY_BLOCK, DEFAULT_PONS_FACTORY, DEFAULT_PONS_HOOK, snowAbis } from "@terminal/adapters";
+import { chainConfigs, tokens } from "@terminal/db";
 import { db } from "@/lib/db";
 import { apiError } from "@/lib/api";
 import { envAdminWallets } from "@/lib/admins";
-import { requireAdmin } from "@/lib/auth";
+import { requireAdminReason } from "@/lib/auth";
 import { invalidateChainConfigCache, listChainConfigs, type ChainConfigRow } from "@/lib/chainConfigs";
 
 /**
@@ -25,10 +25,8 @@ function jsonSafe<T>(v: T): T {
 }
 
 async function checkAdmin(req: NextRequest): Promise<NextResponse | null> {
-  // 会话令牌(签名登录)+ 管理员名单校验,取代可伪造的 x-admin-wallet 头
-  if (!(await requireAdmin(req))) {
-    return NextResponse.json({ error: "未登录或非管理员,无权修改链配置" }, { status: 403 });
-  }
+  const gate = await requireAdminReason(req);
+  if ("error" in gate) return NextResponse.json({ error: gate.error }, { status: gate.status });
   return null;
 }
 
@@ -65,7 +63,9 @@ async function readOnchain(row: ChainConfigRow) {
   for (const [key, addr] of Object.entries({
     factory: row.factory, hook: row.hook, registry: row.registry,
     swapRouter: row.swapRouter, poolManager: row.poolManager,
+    ponsFactory: row.ponsFactory, ponsHook: row.ponsHook,
   })) {
+    if (!addr) continue;
     await safe(`deployed_${key}`, async () => ((await client.getCode({ address: addr as Address })) ?? "0x") !== "0x");
   }
   // 工厂参数
@@ -99,8 +99,31 @@ export async function GET() {
     const rows = await listChainConfigs();
     const result = [];
     for (const row of rows) {
-      const onchain = await readOnchain(row);
-      result.push(jsonSafe({ ...row, onchain }));
+      const cid = row.chainId;
+      const envFactory = process.env[`PONS_FACTORY_${cid}`] ?? "";
+      const envHook = process.env[`PONS_HOOK_${cid}`] ?? "";
+      const envDeploy = process.env[`PONS_DEPLOY_BLOCK_${cid}`] ?? "";
+      const ponsFactory = row.ponsFactory && ADDR_RE.test(row.ponsFactory)
+        ? row.ponsFactory
+        : (ADDR_RE.test(envFactory) ? envFactory.toLowerCase() : DEFAULT_PONS_FACTORY);
+      const ponsHook = row.ponsHook && ADDR_RE.test(row.ponsHook)
+        ? row.ponsHook
+        : (ADDR_RE.test(envHook) ? envHook.toLowerCase() : DEFAULT_PONS_HOOK);
+      const dbDeploy = row.ponsDeployBlock != null ? BigInt(String(row.ponsDeployBlock).split(".")[0] || "0") : 0n;
+      const ponsDeployBlock = dbDeploy > 0n
+        ? dbDeploy
+        : BigInt(envDeploy || String(DEFAULT_PONS_DEPLOY_BLOCK));
+      const filled = { ...row, ponsFactory, ponsHook, ponsDeployBlock };
+      const onchain = await readOnchain(filled);
+      let ponsTokenCount = 0;
+      try {
+        const [cnt] = await db
+          .select({ n: sql<number>`count(*)::int` })
+          .from(tokens)
+          .where(and(eq(tokens.chainId, cid), eq(tokens.platformId, "pons")));
+        ponsTokenCount = Number(cnt?.n ?? 0);
+      } catch { /* 列未迁完时不拖垮列表 */ }
+      result.push(jsonSafe({ ...filled, ponsTokenCount, onchain }));
     }
     return NextResponse.json({ chains: result, adminWalletsConfigured: envAdminWallets().length > 0 });
   } catch (e) {
@@ -108,19 +131,24 @@ export async function GET() {
   }
 }
 
-const EDITABLE = ["name", "rpcUrl", "wsUrl", "factory", "hook", "registry", "swapRouter", "poolManager", "deployBlock", "enabled"] as const;
+const EDITABLE = [
+  "name", "rpcUrl", "wsUrl", "factory", "hook", "registry", "swapRouter", "poolManager", "deployBlock", "enabled",
+  "ponsFactory", "ponsHook", "ponsDeployBlock",
+] as const;
+const ADDR_KEYS = new Set(["factory", "hook", "registry", "swapRouter", "poolManager", "ponsFactory", "ponsHook"]);
+const BLOCK_KEYS = new Set(["deployBlock", "ponsDeployBlock"]);
 
 function validatePatch(body: Record<string, unknown>): { patch: Record<string, unknown>; error?: string } {
   const patch: Record<string, unknown> = {};
   for (const key of EDITABLE) {
     if (!(key in body)) continue;
     const v = body[key];
-    if (["factory", "hook", "registry", "swapRouter", "poolManager"].includes(key)) {
+    if (ADDR_KEYS.has(key)) {
       if (typeof v !== "string" || !ADDR_RE.test(v)) return { patch, error: `${key} 不是合法地址` };
       patch[key] = v.toLowerCase();
-    } else if (key === "deployBlock") {
+    } else if (BLOCK_KEYS.has(key)) {
       const n = Number(v);
-      if (!Number.isFinite(n) || n < 0) return { patch, error: "deployBlock 必须是非负数字" };
+      if (!Number.isFinite(n) || n < 0) return { patch, error: `${key} 必须是非负数字` };
       patch[key] = BigInt(Math.floor(n));
     } else if (key === "enabled") {
       patch[key] = !!v;

@@ -1,6 +1,13 @@
 import { eq } from "drizzle-orm";
 import { chainConfigs } from "@terminal/db";
-import { loadChainConfigsFromEnv, type ChainConfig } from "@terminal/adapters";
+import {
+  loadChainConfigsFromEnv,
+  loadPonsEnv,
+  DEFAULT_PONS_FACTORY,
+  DEFAULT_PONS_HOOK,
+  DEFAULT_PONS_DEPLOY_BLOCK,
+  type ChainConfig,
+} from "@terminal/adapters";
 import { db } from "./db";
 
 export type ChainConfigRow = typeof chainConfigs.$inferSelect;
@@ -33,6 +40,7 @@ async function seedFromEnvIfEmpty(): Promise<void> {
     return; // env 未配置(ENABLED_CHAINS 空)——保持空表
   }
   for (const c of envConfigs) {
+    const pons = loadPonsEnv(c.chainId, c.poolManager);
     await db
       .insert(chainConfigs)
       .values({
@@ -47,15 +55,52 @@ async function seedFromEnvIfEmpty(): Promise<void> {
         swapRouter: c.swapRouter,
         poolManager: c.poolManager,
         deployBlock: c.deployBlock,
+        ponsFactory: pons?.factory ?? DEFAULT_PONS_FACTORY,
+        ponsHook: pons?.hook ?? DEFAULT_PONS_HOOK,
+        ponsDeployBlock: pons?.deployBlock ?? DEFAULT_PONS_DEPLOY_BLOCK,
         enabled: true,
       })
       .onConflictDoNothing();
   }
 }
 
+/** 已有链行若 Pons 列为空,用 env / 已知主网默认值补上,管理页才能看到可编辑地址。 */
+async function ensurePonsColumns(): Promise<void> {
+  const rows = await db
+    .select({
+      chainId: chainConfigs.chainId,
+      poolManager: chainConfigs.poolManager,
+      ponsFactory: chainConfigs.ponsFactory,
+      ponsHook: chainConfigs.ponsHook,
+      ponsDeployBlock: chainConfigs.ponsDeployBlock,
+    })
+    .from(chainConfigs);
+  for (const row of rows) {
+    const needFactory = !row.ponsFactory;
+    const needHook = !row.ponsHook;
+    const needDeploy = row.ponsDeployBlock == null || row.ponsDeployBlock === 0n;
+    if (!needFactory && !needHook && !needDeploy) continue;
+    const pons = loadPonsEnv(row.chainId, row.poolManager as `0x${string}`);
+    await db
+      .update(chainConfigs)
+      .set({
+        ...(needFactory ? { ponsFactory: pons?.factory ?? DEFAULT_PONS_FACTORY } : {}),
+        ...(needHook ? { ponsHook: pons?.hook ?? DEFAULT_PONS_HOOK } : {}),
+        ...(needDeploy ? { ponsDeployBlock: pons?.deployBlock ?? DEFAULT_PONS_DEPLOY_BLOCK } : {}),
+        updatedAt: new Date(),
+      })
+      .where(eq(chainConfigs.chainId, row.chainId));
+  }
+}
+
 /** 全部链配置(管理面板列表) */
 export async function listChainConfigs(): Promise<ChainConfigRow[]> {
   await seedFromEnvIfEmpty();
+  try {
+    await ensurePonsColumns();
+  } catch (e) {
+    console.error("[chainConfigs] ensurePonsColumns:", (e as Error).message);
+  }
   return db.select().from(chainConfigs).orderBy(chainConfigs.chainId);
 }
 
@@ -78,6 +123,7 @@ export async function getChainConfig(chainId: number): Promise<ChainConfigRow | 
   if (!row) {
     const env = loadChainConfigsFromEnv().find((c) => c.chainId === chainId);
     if (env) {
+      const pons = loadPonsEnv(env.chainId, env.poolManager);
       row = {
         chainId: env.chainId,
         platformId: env.platformId,
@@ -90,6 +136,9 @@ export async function getChainConfig(chainId: number): Promise<ChainConfigRow | 
         swapRouter: env.swapRouter,
         poolManager: env.poolManager,
         deployBlock: env.deployBlock,
+        ponsFactory: pons?.factory ?? DEFAULT_PONS_FACTORY,
+        ponsHook: pons?.hook ?? DEFAULT_PONS_HOOK,
+        ponsDeployBlock: pons?.deployBlock ?? DEFAULT_PONS_DEPLOY_BLOCK,
         enabled: true,
         updatedAt: new Date(0),
       };

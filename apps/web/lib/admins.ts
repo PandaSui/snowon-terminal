@@ -10,10 +10,12 @@ export interface AdminEntry {
   createdAt?: string | null;
 }
 
-/** env 名单:ADMIN_WALLETS / NEXT_PUBLIC_ADMIN_WALLETS(逗号分隔) */
+/** env 名单:ADMIN_WALLETS ∪ NEXT_PUBLIC_ADMIN_WALLETS(逗号分隔)。空字符串不当作已配置。 */
 export function envAdminWallets(): string[] {
-  const raw = process.env.ADMIN_WALLETS ?? process.env.NEXT_PUBLIC_ADMIN_WALLETS ?? "";
-  return raw.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+  const raw = [process.env.ADMIN_WALLETS, process.env.NEXT_PUBLIC_ADMIN_WALLETS]
+    .filter((s): s is string => !!s && s.trim().length > 0)
+    .join(",");
+  return [...new Set(raw.split(",").map((s) => s.trim().toLowerCase()).filter((s) => /^0x[0-9a-f]{40}$/.test(s)))];
 }
 
 /** env ∪ DB,env 优先(同地址不重复) */

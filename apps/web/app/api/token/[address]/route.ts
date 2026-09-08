@@ -86,7 +86,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ address
       : null;
 
     const socialsMissing = t.website == null && t.twitter == null && t.telegram == null && t.github == null;
-    if ((t.description == null || socialsMissing) && !enriching.has(addr)) {
+    if (t.platformId !== "pons" && (t.description == null || socialsMissing) && !enriching.has(addr)) {
       enriching.add(addr);
       // IPFS/Pinata 不挡首屏;后台写入后下次请求带上社交字段
       void fetchTokenOffchainMeta(addr)

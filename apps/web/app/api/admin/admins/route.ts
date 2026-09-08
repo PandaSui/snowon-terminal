@@ -4,7 +4,7 @@ import { adminWallets } from "@terminal/db";
 import { db } from "@/lib/db";
 import { apiError } from "@/lib/api";
 import { envAdminWallets, listAdminWallets } from "@/lib/admins";
-import { requireAdmin } from "@/lib/auth";
+import { requireAdminReason } from "@/lib/auth";
 
 /**
  * 管理员名单管理。
@@ -20,9 +20,9 @@ const ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
 
 /** 校验会话令牌 + 管理员;成功返回管理员地址,失败返回 403 响应。 */
 async function checkAdmin(req: NextRequest): Promise<string | NextResponse> {
-  const admin = await requireAdmin(req);
-  if (!admin) return NextResponse.json({ error: "未登录或非管理员,无权管理管理员名单" }, { status: 403 });
-  return admin;
+  const gate = await requireAdminReason(req);
+  if ("error" in gate) return NextResponse.json({ error: gate.error }, { status: gate.status });
+  return gate.addr;
 }
 
 export async function GET() {

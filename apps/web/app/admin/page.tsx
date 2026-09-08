@@ -25,6 +25,10 @@ interface AdminChain {
   swapRouter: string;
   poolManager: string;
   deployBlock: string;
+  ponsFactory: string;
+  ponsHook: string;
+  ponsDeployBlock: string;
+  ponsTokenCount?: number;
   enabled: boolean;
   updatedAt: string;
   onchain: Record<string, unknown>;
@@ -42,6 +46,11 @@ const CONTRACT_LABELS: Array<[keyof AdminChain & string, string]> = [
   ["registry", "报价资产 Registry"],
   ["swapRouter", "Snow 路由"],
   ["poolManager", "V4 PoolManager"],
+];
+
+const PONS_LABELS: Array<[keyof AdminChain & string, string]> = [
+  ["ponsFactory", "Pons V2 发射工厂"],
+  ["ponsHook", "Pons V2 Meme Hook"],
 ];
 
 const inputStyle: React.CSSProperties = {
@@ -149,12 +158,13 @@ function ChainForm({
 
 function ChainCard({ chain, isAdmin }: { chain: AdminChain; isAdmin: boolean }) {
   const qc = useQueryClient();
-  const { token } = useSession();
+  const { ensure } = useSession();
   const [editing, setEditing] = useState(false);
   const oc = chain.onchain;
 
   const save = useMutation({
     mutationFn: async (values: Record<string, string>) => {
+      const token = await ensure();
       const res = await fetch(apiUrl("/api/admin/chains"), {
         method: "PUT",
         headers: { "content-type": "application/json", authorization: "Bearer " + token },
@@ -180,8 +190,8 @@ function ChainCard({ chain, isAdmin }: { chain: AdminChain; isAdmin: boolean }) 
         <span style={{ fontSize: 11, color: "#5e6673", background: "#1e2329", borderRadius: 8, padding: "1px 8px" }}>
           chainId {chain.chainId}
         </span>
-        <span style={{ fontSize: 11, color: "#5e6673", background: "#1e2329", borderRadius: 8, padding: "1px 8px" }}>
-          {chain.platformId}
+        <span style={{ fontSize: 11, color: "#f0b90b", background: "rgba(240,185,11,0.12)", borderRadius: 8, padding: "1px 8px" }}>
+          SnowOn
         </span>
         {!chain.enabled && <span style={{ fontSize: 11, color: "#f6465d" }}>已停用</span>}
         <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
@@ -257,15 +267,164 @@ function ChainCard({ chain, isAdmin }: { chain: AdminChain; isAdmin: boolean }) 
   );
 }
 
+function PonsForm({
+  initial, submitting, error, onSubmit, onCancel,
+}: {
+  initial: Pick<AdminChain, "ponsFactory" | "ponsHook" | "ponsDeployBlock">;
+  submitting: boolean;
+  error: string | null;
+  onSubmit: (values: Record<string, string>) => void;
+  onCancel: () => void;
+}) {
+  const [form, setForm] = useState<Record<string, string>>(() => ({
+    ponsFactory: String(initial.ponsFactory ?? ""),
+    ponsHook: String(initial.ponsHook ?? ""),
+    ponsDeployBlock: String(initial.ponsDeployBlock ?? "0"),
+  }));
+  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const fields: Array<[string, string, boolean]> = [
+    ["ponsFactory", "Pons V2 发射工厂", true],
+    ["ponsHook", "Pons V2 Meme Hook", true],
+    ["ponsDeployBlock", "Pons 索引起始区块(工厂部署块)", false],
+  ];
+  return (
+    <div style={{ borderTop: "1px solid #1e2329", padding: 12, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10 }}>
+      {fields.map(([key, label, required]) => (
+        <label key={key} style={{ display: "block", fontSize: 11, color: "#848e9c" }}>
+          {label}{required && <span style={{ color: "#f6465d" }}> *</span>}
+          <input
+            value={form[key]}
+            onChange={set(key)}
+            style={{ ...inputStyle, marginTop: 4 }}
+            spellCheck={false}
+          />
+        </label>
+      ))}
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 8 }}>
+        <button onClick={() => onSubmit(form)} disabled={submitting} style={{ ...btnGold, opacity: submitting ? 0.6 : 1 }}>
+          {submitting ? "保存中…" : "保存 Pons V2"}
+        </button>
+        <button onClick={onCancel} style={btnGhost}>取消</button>
+      </div>
+      {error && <div style={{ gridColumn: "1 / -1", color: "#f6465d", fontSize: 12 }}>❌ {error}</div>}
+    </div>
+  );
+}
+
+function PonsV2Card({ chain, isAdmin }: { chain: AdminChain; isAdmin: boolean }) {
+  const qc = useQueryClient();
+  const { ensure } = useSession();
+  const [editing, setEditing] = useState(false);
+  const oc = chain.onchain;
+
+  const save = useMutation({
+    mutationFn: async (values: Record<string, string>) => {
+      const token = await ensure();
+      const res = await fetch(apiUrl("/api/admin/chains"), {
+        method: "PUT",
+        headers: { "content-type": "application/json", authorization: "Bearer " + token },
+        body: JSON.stringify({
+          chainId: chain.chainId,
+          ponsFactory: values.ponsFactory,
+          ponsHook: values.ponsHook,
+          ponsDeployBlock: values.ponsDeployBlock,
+        }),
+      });
+      const body = await readJson<{ error?: string }>(res);
+      if (!res.ok) throw new Error(body.error ?? `保存失败(${res.status})`);
+    },
+    onSuccess: () => {
+      setEditing(false);
+      qc.invalidateQueries({ queryKey: ["admin-chains"] });
+    },
+  });
+
+  return (
+    <section style={{ border: "1px solid #1e2329", borderRadius: 10, background: "#0d1117", overflow: "hidden" }}>
+      <header style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderBottom: "1px solid #1e2329", flexWrap: "wrap" }}>
+        <span style={{ width: 10, height: 10, borderRadius: 5, background: chain.enabled ? "#00c3ff" : "#f6465d" }} />
+        <span style={{ fontSize: 15, fontWeight: 800 }}>{chain.name}</span>
+        <span style={{ fontSize: 11, color: "#5e6673", background: "#1e2329", borderRadius: 8, padding: "1px 8px" }}>
+          chainId {chain.chainId}
+        </span>
+        <span style={{ fontSize: 11, color: "#00c3ff", background: "rgba(0,195,255,0.12)", borderRadius: 8, padding: "1px 8px" }}>
+          Pons V2
+        </span>
+        <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+          {isAdmin && !editing && (
+            <button onClick={() => setEditing(true)} style={btnGhost}>✏️ 编辑参数</button>
+          )}
+        </span>
+      </header>
+
+      <div style={{ padding: "12px 14px", borderBottom: "1px solid #1e2329" }}>
+        <div style={{ fontSize: 11, color: "#5e6673", fontWeight: 700, marginBottom: 8 }}>索引状态</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8 }}>
+          <Param label="已索引 Pons 代币" value={`${chain.ponsTokenCount ?? 0} 个`} />
+          <Param
+            label="工厂链上代码"
+            value={oc.deployed_ponsFactory === true ? "已部署" : oc.deployed_ponsFactory === false ? "无代码" : "未探测"}
+            warn={oc.deployed_ponsFactory === false}
+          />
+          <Param
+            label="Hook 链上代码"
+            value={oc.deployed_ponsHook === true ? "已部署" : oc.deployed_ponsHook === false ? "无代码" : "未探测"}
+            warn={oc.deployed_ponsHook === false}
+          />
+          <Param label="共用 PoolManager" value={shortAddr(chain.poolManager)} />
+        </div>
+      </div>
+
+      <div style={{ padding: "12px 14px", borderBottom: editing ? "1px solid #1e2329" : 0 }}>
+        <div style={{ fontSize: 11, color: "#5e6673", fontWeight: 700, marginBottom: 8 }}>合约地址</div>
+        {PONS_LABELS.map(([key, label]) => {
+          const addr = (chain[key] as string) || "";
+          const deployed = oc[`deployed_${key}`];
+          return (
+            <div key={key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 12 }}>
+              <span
+                style={{
+                  width: 7, height: 7, borderRadius: 4, flexShrink: 0,
+                  background: deployed === true ? "#0ecb81" : deployed === false ? "#f6465d" : "#5e6673",
+                }}
+                title={deployed === true ? "链上有代码" : deployed === false ? "链上无代码!" : "未探测"}
+              />
+              <span style={{ width: 150, color: "#848e9c", flexShrink: 0 }}>{label}</span>
+              <span style={{ fontFamily: "monospace", color: "#eaecef" }} className="addr-full">{addr || "未配置"}</span>
+              <span style={{ fontFamily: "monospace", color: "#eaecef", display: "none" }} className="addr-short">{addr ? shortAddr(addr) : "未配置"}</span>
+              {addr ? <CopyBtn value={addr} /> : null}
+            </div>
+          );
+        })}
+        <div style={{ display: "flex", gap: 16, marginTop: 8, fontSize: 11, color: "#5e6673", flexWrap: "wrap" }}>
+          <span>索引起始块: <span style={{ fontFamily: "monospace", color: "#848e9c" }}>{chain.ponsDeployBlock}</span></span>
+          <span>PoolManager 与 SnowOn 共用,在上方 SnowOn 卡编辑</span>
+        </div>
+      </div>
+
+      {editing && (
+        <PonsForm
+          initial={chain}
+          submitting={save.isPending}
+          error={save.error ? (save.error as Error).message : null}
+          onSubmit={(v) => save.mutate(v)}
+          onCancel={() => setEditing(false)}
+        />
+      )}
+    </section>
+  );
+}
+
 /** 管理员名单管理卡:列出主管理员(env)与协管员(DB),管理员可增删协管员 */
 function AdminsCard({ wallet, isAdmin }: { wallet: string; isAdmin: boolean }) {
   const qc = useQueryClient();
   const { admins } = useAdmins(wallet);
-  const { token } = useSession();
+  const { ensure } = useSession();
   const [input, setInput] = useState("");
 
   const add = useMutation({
     mutationFn: async (address: string) => {
+      const token = await ensure();
       const res = await fetch(apiUrl("/api/admin/admins"), {
         method: "POST",
         headers: { "content-type": "application/json", authorization: "Bearer " + token },
@@ -282,6 +441,7 @@ function AdminsCard({ wallet, isAdmin }: { wallet: string; isAdmin: boolean }) {
 
   const remove = useMutation({
     mutationFn: async (address: string) => {
+      const token = await ensure();
       const res = await fetch(apiUrl(`/api/admin/admins?address=${encodeURIComponent(address)}`), {
         method: "DELETE",
         headers: { authorization: "Bearer " + token },
@@ -360,7 +520,7 @@ function AdminsCard({ wallet, isAdmin }: { wallet: string; isAdmin: boolean }) {
 
 function PinSettingsCard({ wallet, isAdmin }: { wallet: string; isAdmin: boolean }) {
   const qc = useQueryClient();
-  const { token } = useSession();
+  const { ensure } = useSession();
   const { data } = useQuery({
     queryKey: ["admin-settings"],
     queryFn: async () => {
@@ -378,6 +538,7 @@ function PinSettingsCard({ wallet, isAdmin }: { wallet: string; isAdmin: boolean
   const set = (k: keyof typeof f, v: string) => setForm({ ...f, [k]: v });
   const save = useMutation({
     mutationFn: async () => {
+      const token = await ensure();
       const res = await fetch(apiUrl("/api/admin/settings"), {
         method: "PUT",
         headers: { "content-type": "application/json", authorization: "Bearer " + token },
@@ -442,7 +603,7 @@ export default function AdminPage() {
   const wallet = user?.wallet?.address?.toLowerCase() ?? "";
 
   const adminQuery = useAdmins(wallet);
-  const { token, signedIn, signIn, signing } = useSession();
+  const { signedIn, signIn, signing, error: sessionError, ensure } = useSession();
   const isAdmin = adminQuery.isAdmin;
 
   const { data, isLoading, isError, error, dataUpdatedAt } = useQuery({
@@ -458,9 +619,10 @@ export default function AdminPage() {
 
   const create = useMutation({
     mutationFn: async (values: Record<string, string>) => {
+      const t = await ensure();
       const res = await fetch(apiUrl("/api/admin/chains"), {
         method: "POST",
-        headers: { "content-type": "application/json", authorization: "Bearer " + token },
+        headers: { "content-type": "application/json", authorization: "Bearer " + t },
         body: JSON.stringify(values),
       });
       const body = await readJson<{ error?: string }>(res);
@@ -493,7 +655,7 @@ export default function AdminPage() {
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <h2 style={{ margin: 0, fontSize: 16 }}>⚙️ 发射工厂参数配置</h2>
         <span style={{ fontSize: 11, color: "#5e6673" }}>
-          每条链的工厂/合约群参数 · DB 为权威来源 · 15s 自动刷新({new Date(dataUpdatedAt).toLocaleTimeString()})
+          SnowOn 与 Pons V2 各一套工厂/Hook · DB 为权威来源 · 15s 自动刷新({new Date(dataUpdatedAt).toLocaleTimeString()})
         </span>
       </div>
 
@@ -506,17 +668,18 @@ export default function AdminPage() {
       )}
       {isAdmin && !signedIn && (
         <div style={{ padding: "8px 12px", border: "1px solid #f0b90b", borderRadius: 8, background: "rgba(240,185,11,0.08)", fontSize: 12, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <span style={{ color: "#f0b90b" }}>🔐 修改配置前需用钱包签名登录(仅验证身份,不产生交易、不花 gas)。</span>
+          <span style={{ color: "#f0b90b" }}>🔐 保存配置时会弹出钱包签名(只验证身份,不上链、不花 gas)。也可先点这里登录。</span>
           <button onClick={() => void signIn()} disabled={signing} style={{ ...btnGold, opacity: signing ? 0.6 : 1 }}>
             {signing ? "签名中…" : "签名登录"}
           </button>
+          {sessionError && <span style={{ color: "#f6465d" }}>{sessionError}</span>}
         </div>
       )}
       {isAdmin && signedIn && (
         <div style={{ fontSize: 11, color: "#0ecb81" }}>✓ 已签名登录,可编辑并保存</div>
       )}
       <div style={{ fontSize: 11, color: "#5e6673" }}>
-        ⚠ 链上参数(协议分成/毕业阈值等)为合约实时只读;此处编辑的是终端侧链配置(RPC/合约地址/索引起块)。indexer 仍读 env 启动,改配置后需重启 indexer 生效。
+        ⚠ 链上参数(协议分成/毕业阈值等)为合约实时只读;此处编辑的是终端侧链配置(RPC/合约地址/索引起块)。indexer 启动时读 DB(覆盖 env),改配置后需重启 indexer 生效。
       </div>
 
       {isLoading && <div style={{ color: "#848e9c", padding: 20 }}>加载中…</div>}
@@ -525,7 +688,12 @@ export default function AdminPage() {
       <AdminsCard wallet={wallet} isAdmin={isAdmin} />
       <PinSettingsCard wallet={wallet} isAdmin={isAdmin} />
 
-      {data?.chains.map((c) => <ChainCard key={c.chainId} chain={c} isAdmin={isAdmin} />)}
+      {data?.chains.map((c) => (
+        <div key={c.chainId} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <ChainCard chain={c} isAdmin={isAdmin} />
+          <PonsV2Card chain={c} isAdmin={isAdmin} />
+        </div>
+      ))}
       {data && data.chains.length === 0 && (
         <div style={{ color: "#848e9c", padding: 20, textAlign: "center" }}>还没有链配置,点下方新增第一条。</div>
       )}

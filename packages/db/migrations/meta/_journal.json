@@ -78,6 +78,13 @@
       "when": 1788680000000,
       "tag": "0008_tracked_wallets",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1788690000000,
+      "tag": "0010_pons_config",
+      "breakpoints": true
     }
   ]
 }

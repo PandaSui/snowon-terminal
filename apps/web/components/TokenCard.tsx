@@ -13,6 +13,7 @@ import { TwitterPreview } from "./TwitterPreview";
 
 export interface HomeToken {
   address: string;
+  platformId?: string | null;
   name: string;
   symbol: string;
   logoUri: string | null;
@@ -295,6 +296,18 @@ function TokenCardInner({ t, showMultiplier }: { t: HomeToken; showMultiplier?: 
                     }}
                   >
                     🔥{t.volRank === 1 ? "TOP1" : t.volRank === 2 ? "TOP2" : "TOP3"}
+                  </span>
+                )}
+                {t.platformId === "pons" && (
+                  <span
+                    title="Pons V2"
+                    style={{
+                      flexShrink: 0, fontSize: 9, fontWeight: 800, letterSpacing: 0.3,
+                      padding: "1px 5px", borderRadius: 3, color: "#00c3ff",
+                      background: "rgba(0,195,255,0.12)", border: "1px solid rgba(0,195,255,0.35)",
+                    }}
+                  >
+                    PONS
                   </span>
                 )}
                 {t.antiBundle && <span title="antiBundle" style={{ fontSize: 10 }}>🛡</span>}

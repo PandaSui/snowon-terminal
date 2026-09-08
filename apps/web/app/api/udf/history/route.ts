@@ -4,7 +4,7 @@ import { CHAIN_ID, db } from "@/lib/db";
 import { RES_SECONDS } from "@/lib/chartResolutions";
 import { ttlMap } from "@/lib/ttlCache";
 
-const historyCache = ttlMap<string, unknown>(2_000);
+const historyCache = ttlMap<string, unknown>(12_000, 512);
 
 function asRows<T>(r: unknown): T[] {
   if (Array.isArray(r)) return r as T[];

@@ -75,6 +75,64 @@ export async function applyTradeToPosition(
     });
 }
 
+/**
+ * 钱包互转只改持仓数量:
+ *  转入: balance += amount, 成本不变(均价被摊薄)
+ *  转出: balance -= amount, 按转出比例结转成本,不记已实现盈亏
+ * 不计入 buy_count / sell_count,也不进成交额。
+ */
+export async function applyTransferToPosition(
+  db: Db,
+  args: {
+    chainId: number;
+    wallet: string;
+    token: string;
+    isIn: boolean;
+    tokenAmount: bigint;
+    blockTimestamp: Date;
+  },
+) {
+  const { chainId, token, isIn, tokenAmount } = args;
+  const wallet = args.wallet.toLowerCase();
+  const ts = args.blockTimestamp.toISOString();
+  const amt = tokenAmount.toString();
+
+  await db.execute(sql`
+    INSERT INTO positions (chain_id, wallet, token_address, balance, cost_basis_eth,
+      realized_pnl_eth, total_bought_eth, total_sold_eth, buy_count, sell_count,
+      first_buy_at, last_trade_at)
+    VALUES (${chainId}, ${wallet}, ${token},
+      ${isIn ? amt : "0"},
+      '0', '0', '0', '0',
+      0, 0,
+      NULL, ${ts})
+    ON CONFLICT (chain_id, wallet, token_address) DO UPDATE SET
+      balance = GREATEST(positions.balance::numeric
+        ${sql.raw(isIn ? "+" : "-")} ${amt}, 0),
+      cost_basis_eth = ${sql.raw(
+        isIn
+          ? `positions.cost_basis_eth`
+          : `GREATEST(COALESCE(positions.cost_basis_eth::numeric, 0) -
+              COALESCE(positions.cost_basis_eth::numeric * ${amt} /
+               NULLIF(positions.balance::numeric, 0), 0), 0)`,
+      )},
+      last_trade_at = ${ts}
+  `);
+
+  await db
+    .insert(wallets)
+    .values({
+      chainId,
+      address: wallet,
+      firstSeenAt: args.blockTimestamp,
+      lastSeenAt: args.blockTimestamp,
+    })
+    .onConflictDoUpdate({
+      target: [wallets.chainId, wallets.address],
+      set: { lastSeenAt: args.blockTimestamp },
+    });
+}
+
 /** 未实现 PNL = balance × 现价 − costBasis(查询时算,不落库) */
 export async function unrealizedPnl(db: Db, chainId: number, wallet: string, token: string, priceEth: bigint) {
   const [row] = await db

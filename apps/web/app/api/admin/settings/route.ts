@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getAppSettings, updateAppSettings, SNOW_TOKEN, type AppSettings } from "@terminal/db";
-import { requireAdmin } from "@/lib/auth";
+import { requireAdminReason } from "@/lib/auth";
 import { db } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -13,7 +13,8 @@ export async function GET() {
 }
 
 export async function PUT(req: NextRequest) {
-  if (!(await requireAdmin(req))) return NextResponse.json({ error: "未授权" }, { status: 401 });
+  const gate = await requireAdminReason(req);
+  if ("error" in gate) return NextResponse.json({ error: gate.error }, { status: gate.status });
   const body = (await req.json().catch(() => ({}))) as Partial<AppSettings>;
   const patch: Partial<AppSettings> = {};
 

@@ -4,7 +4,7 @@ import { apiUrl } from "@/lib/apiBase";
 import Link from "next/link";
 import { usePrivy } from "@privy-io/react-auth";
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { readJson } from "@/lib/http";
 import { useGlobalChat } from "@/lib/useGlobalChat";
 import { TokenCard, type HomeToken } from "@/components/TokenCard";
@@ -22,6 +22,20 @@ import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { t, useLocale } from "@/lib/locale";
 
 const CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? 4663);
+const PLATFORM_KEY = "ui.platform";
+type PlatformFilter = "all" | "snowon" | "pons";
+
+function readPlatform(): PlatformFilter {
+  try {
+    const v = localStorage.getItem(PLATFORM_KEY);
+    if (v === "snowon" || v === "pons" || v === "all") return v;
+  } catch { /* ignore */ }
+  return "all";
+}
+
+function tokenPlatform(t: HomeToken): "pons" | "snowon" {
+  return t.platformId === "pons" ? "pons" : "snowon";
+}
 
 async function fetchTokens(): Promise<HomeToken[]> {
   const res = await fetch(apiUrl("/api/tokens"));
@@ -81,13 +95,21 @@ export default function DiscoverPage() {
   const chat = useGlobalChat(CHAIN_ID);
   const isMobile = useIsMobile();
   const [tab, setTab] = useState<"movers" | "fresh" | "almost" | "graduated" | "chat">("movers");
+  const [platform, setPlatform] = useState<PlatformFilter>("all");
+  useEffect(() => {
+    setPlatform(readPlatform());
+  }, []);
+  function pickPlatform(next: PlatformFilter) {
+    setPlatform(next);
+    try { localStorage.setItem(PLATFORM_KEY, next); } catch { /* ignore */ }
+  }
 
   // 管理员钱包(env 主管理员 ∪ DB 协管员)才显示「管理」入口
   const wallet = user?.wallet?.address?.toLowerCase() ?? "";
   const isAdmin = useAdmins(wallet).isAdmin;
 
   const lists = useMemo(() => {
-    const all = tokens ?? [];
+    const all = (tokens ?? []).filter((t) => platform === "all" || tokenPlatform(t) === platform);
     const num = (v: string | null) => (v == null ? -Infinity : Number(v));
     return {
       // 异动代币:以毕业代币为主,按市值飙升(24h 涨幅)排序
@@ -103,7 +125,7 @@ export default function DiscoverPage() {
         .filter((t) => t.graduated)
         .sort((a, b) => +new Date(b.graduatedAt ?? b.createdAt) - +new Date(a.graduatedAt ?? a.createdAt)),
     };
-  }, [tokens]);
+  }, [tokens, platform]);
 
   const columns = [
     { key: "movers" as const, title: t(locale, "movers"), short: t(locale, "movers"), dot: "#f6465d", tokens: lists.movers, empty: "—" },
@@ -167,7 +189,31 @@ export default function DiscoverPage() {
       </header>
 
       {/* 标星收藏代币栏 */}
-      <FavoritesBar tokens={tokens ?? []} />
+      <FavoritesBar tokens={(tokens ?? []).filter((t) => platform === "all" || tokenPlatform(t) === platform)} />
+
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 11, color: "#5e6673", fontWeight: 700 }}>{t(locale, "platform")}</span>
+        {([
+          ["all", t(locale, "all")],
+          ["snowon", t(locale, "platformSnowon")],
+          ["pons", t(locale, "platformPons")],
+        ] as const).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => pickPlatform(key)}
+            style={{
+              padding: "3px 10px", fontSize: 11, fontWeight: 800, cursor: "pointer",
+              borderRadius: 6,
+              border: `1px solid ${platform === key ? (key === "pons" ? "#00c3ff" : "#f0b90b") : "#2b3139"}`,
+              background: platform === key ? "#1c1f26" : "transparent",
+              color: platform === key ? (key === "pons" ? "#00c3ff" : "#f0b90b") : "#848e9c",
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
 
       {isMobile ? (
         <>

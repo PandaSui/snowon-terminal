@@ -5,8 +5,9 @@ import { usePrivy } from "@privy-io/react-auth";
 import { apiUrl } from "@/lib/apiBase";
 import type { ChatMsg, Pin } from "@/lib/useGlobalChat";
 import { EmojiPicker } from "./EmojiPicker";
-import { EmojiAvatar } from "./EmojiAvatar";
 import { useT } from "@/lib/locale";
+import { useSession } from "@/lib/useSession";
+import { ChatMsgRow, isMineMsg } from "./ChatMsgRow";
 
 interface Props {
   messages: ChatMsg[];
@@ -27,7 +28,9 @@ interface Props {
  */
 export function HomeChat({ messages, pins, connected, lastError, onSend, onPin, pinning, signedIn, signIn }: Props) {
   const tr = useT();
-  const { authenticated, login } = usePrivy();
+  const { authenticated, login, user } = usePrivy();
+  const session = useSession();
+  const myId = (session.address || user?.wallet?.address || "").toLowerCase();
   // 三段式:未连接钱包→登录;已连接未签名→签名登录;已签名→执行
   const act = (fn: () => void) => (!authenticated ? login() : !signedIn ? signIn() : fn());
   const [input, setInput] = useState("");
@@ -76,18 +79,15 @@ export function HomeChat({ messages, pins, connected, lastError, onSend, onPin, 
           </div>
         )}
         {messages.map((m) => (
-          <div key={m.id} style={{ marginBottom: 6, lineHeight: 1.5, display: "flex", alignItems: "flex-start", gap: 6 }}>
-            <EmojiAvatar seed={m.userId || m.username} size={16} />
-            <span style={{ minWidth: 0 }}>
-            <span style={{ color: "#f0b90b", fontWeight: 600 }}>{m.username}</span>
-            {m.holdingShareBps != null && m.holdingShareBps > 0 && (
-              <span style={{ marginLeft: 4, fontSize: 10, color: "#0ecb81" }}>
-                {tr("holdShare", { pct: (m.holdingShareBps / 100).toFixed(2) })}
-              </span>
-            )}
-            <span style={{ marginLeft: 6, wordBreak: "break-word" }}>{m.content}</span>
-            </span>
-          </div>
+          <ChatMsgRow
+            key={m.id}
+            mine={isMineMsg(m.userId, myId)}
+            userId={m.userId}
+            username={m.username}
+            content={m.content}
+            holdingShareBps={m.holdingShareBps}
+            avatarSize={16}
+          />
         ))}
       </div>
 

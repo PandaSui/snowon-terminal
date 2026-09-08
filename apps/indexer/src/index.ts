@@ -3,8 +3,8 @@ import Redis from "ioredis";
 import { parseAbiItem, type Address, type Hex, type Log } from "viem";
 import { eq } from "drizzle-orm";
 import { zeroAddress } from "viem";
-import { createDb, tokens } from "@terminal/db";
-import { loadChainConfigsFromEnv, type ChainConfig } from "@terminal/adapters";
+import { chainConfigs, createDb, tokens } from "@terminal/db";
+import { loadChainConfigsFromEnv, mergePonsConfig, type ChainConfig, type PonsEnv } from "@terminal/adapters";
 import { clientFor } from "./config.js";
 import { EventHandlers } from "./handlers.js";
 import { rescoreRecentTokens } from "./bundle.js";
@@ -26,13 +26,37 @@ const evSwap = parseAbiItem(
 const evModifyLiq = parseAbiItem(
   "event ModifyLiquidity(bytes32 indexed id, address indexed sender, int24 tickLower, int24 tickUpper, int256 liquidityDelta, bytes32 salt)",
 );
+const evTransfer = parseAbiItem(
+  "event Transfer(address indexed from, address indexed to, uint256 value)",
+);
+const evPonsLaunched = parseAbiItem(
+  "event TokenLaunched(address indexed token, address indexed curve, address indexed deployer, address pairToken, uint256 launchConfigId, uint256 graduationThreshold)",
+);
+const evPonsBuy = parseAbiItem(
+  "event CurveBuy(address indexed buyer, address indexed recipient, uint256 quoteIn, uint256 tokensOut, uint256 fee, uint256 tax)",
+);
+const evPonsSell = parseAbiItem(
+  "event CurveSell(address indexed seller, address indexed recipient, uint256 tokensIn, uint256 quoteOut, uint256 fee, uint256 tax)",
+);
+const evPonsPoolGrad = parseAbiItem(
+  "event PoolGraduated(address indexed token, uint256 positionId, uint256 tokenAmount, uint256 pairTokenAmount)",
+);
 
-const BATCH = 15_000n;
+const BATCH = 80n;
 const ADDR_CHUNK = 80;
 
 function chunk<T>(arr: T[], n: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
+  return out;
+}
+
+async function mapPool<T, R>(items: T[], n: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = [];
+  for (let i = 0; i < items.length; i += n) {
+    const part = await Promise.all(items.slice(i, i + n).map(fn));
+    out.push(...part);
+  }
   return out;
 }
 
@@ -104,22 +128,60 @@ function curveFromCreated(log: Log): Address | null {
   return curve ? (curve.toLowerCase() as Address) : null;
 }
 
+function tokenFromCreated(log: Log): Address | null {
+  const token = (log as Log & { args?: { token?: Address } }).args?.token;
+  return token ? (token.toLowerCase() as Address) : null;
+}
+
 function poolFromGrad(log: Log): Hex | null {
   const id = (log as Log & { args?: { poolId?: string } }).args?.poolId;
   return id ? (id.toLowerCase() as Hex) : null;
 }
 
+async function resolvePons(cfg: ChainConfig, db: ReturnType<typeof createDb>): Promise<PonsEnv | null> {
+  try {
+    const [row] = await db.select().from(chainConfigs).where(eq(chainConfigs.chainId, cfg.chainId)).limit(1);
+    return mergePonsConfig(cfg.chainId, cfg.poolManager, row);
+  } catch (e) {
+    console.warn(`[chain ${cfg.chainId}] pons DB merge failed, env/defaults:`, (e as Error).message);
+    return mergePonsConfig(cfg.chainId, cfg.poolManager);
+  }
+}
+
 async function runChain(cfg: ChainConfig, db: ReturnType<typeof createDb>, redis: Redis) {
   const client = clientFor(cfg);
   const publish = (ch: string, payload: unknown) => void redis.publish(ch, JSON.stringify(payload));
-  const h = new EventHandlers(db, client, cfg, publish);
+  const ponsEnv = await resolvePons(cfg, db);
+  const h = new EventHandlers(
+    db, client, cfg, publish,
+    ponsEnv ? { factory: ponsEnv.factory, hook: ponsEnv.hook } : undefined,
+  );
   const onErr = (e: unknown) => console.error(e);
 
   const tokenRows = await db
-    .select({ curveAddress: tokens.curveAddress, poolId: tokens.poolId })
+    .select({
+      address: tokens.address,
+      curveAddress: tokens.curveAddress,
+      poolId: tokens.poolId,
+      createdAtBlock: tokens.createdAtBlock,
+      platformId: tokens.platformId,
+      graduated: tokens.graduated,
+    })
     .from(tokens)
     .where(eq(tokens.chainId, cfg.chainId));
-  const curveSet = new Set<Address>(tokenRows.map((r) => r.curveAddress.toLowerCase() as Address));
+  const curveSet = new Set<Address>(
+    tokenRows.filter((r) => r.platformId !== "pons").map((r) => r.curveAddress.toLowerCase() as Address),
+  );
+  // 已毕业的 Pons 走 V4 池,live 不必再扫曲线 Buy/Sell(上千条地址会把 RPC 打满 429)
+  const ponsCurveSet = new Set<Address>(
+    tokenRows
+      .filter((r) => r.platformId === "pons" && !r.graduated)
+      .map((r) => r.curveAddress.toLowerCase() as Address),
+  );
+  const tokenSet = new Set<Address>(tokenRows.map((r) => r.address.toLowerCase() as Address));
+  const curveOfToken = new Map<string, Address>(
+    tokenRows.map((r) => [r.address.toLowerCase(), r.curveAddress.toLowerCase() as Address]),
+  );
   const poolSet = new Set<Hex>(
     tokenRows.map((r) => r.poolId).filter((id): id is string => Boolean(id)).map((id) => id.toLowerCase() as Hex),
   );
@@ -127,7 +189,8 @@ async function runChain(cfg: ChainConfig, db: ReturnType<typeof createDb>, redis
   const stored = await loadCursor(db, cfg.chainId);
   let from = stored != null ? stored + 1n : cfg.deployBlock;
   let head = await getBlockNumberWithRetry(client);
-  console.log(`[chain ${cfg.chainId}] backfilling ${from} → ${head} (cursor=${stored ?? "none"})`);
+  const catchUpTo = head;
+  console.log(`[chain ${cfg.chainId}] backfilling ${from} → ${catchUpTo} (cursor=${stored ?? "none"} tokens=${tokenRows.length} ponsCurves=${ponsCurveSet.size} pools=${poolSet.size})`);
 
   async function fetchCurveLogs(fromBlock: bigint, toBlock: bigint, curves: Address[]) {
     const buys: Log[] = [];
@@ -166,7 +229,55 @@ async function runChain(cfg: ChainConfig, db: ReturnType<typeof createDb>, redis
     return { swaps, liqs };
   }
 
-  async function processRange(fromBlock: bigint, toBlock: bigint) {
+  async function fetchTransferLogs(fromBlock: bigint, toBlock: bigint, addrs: Address[]) {
+    const out: Log[] = [];
+    if (addrs.length === 0) return out;
+    for (const addrsChunk of chunk(addrs, ADDR_CHUNK)) {
+      const logs = await getLogsWithRetry(client, {
+        address: addrsChunk, event: evTransfer, fromBlock, toBlock,
+      });
+      out.push(...logs);
+    }
+    return out;
+  }
+
+  async function fetchPonsCurveLogs(fromBlock: bigint, toBlock: bigint, curves: Address[]) {
+    const buys: Log[] = [];
+    const sells: Log[] = [];
+    if (curves.length === 0) return { buys, sells };
+    const span = toBlock - fromBlock;
+    // 1800 条曲线按地址分片会把 RPC 打满;500 块以内改为按事件拉取,超时则回退分片
+    if (curves.length > 200 && span <= 800n) {
+      try {
+        const [b, s] = await Promise.all([
+          getLogsWithRetry(client, { event: evPonsBuy, fromBlock, toBlock }),
+          getLogsWithRetry(client, { event: evPonsSell, fromBlock, toBlock }),
+        ]);
+        const allow = new Set(curves.map((a) => a.toLowerCase()));
+        return {
+          buys: b.filter((l) => allow.has((l.address ?? "").toLowerCase())),
+          sells: s.filter((l) => allow.has((l.address ?? "").toLowerCase())),
+        };
+      } catch (e) {
+        console.warn(`[chain] unfiltered pons logs failed, fallback chunks:`, (e as Error).message?.slice(0, 120));
+      }
+    }
+    const parts = await mapPool(chunk(curves, ADDR_CHUNK), 2, async (addrs) => {
+      const [b, s] = await Promise.all([
+        getLogsWithRetry(client, { address: addrs, event: evPonsBuy, fromBlock, toBlock }),
+        getLogsWithRetry(client, { address: addrs, event: evPonsSell, fromBlock, toBlock }),
+      ]);
+      return { b, s };
+    });
+    for (const p of parts) {
+      buys.push(...p.b);
+      sells.push(...p.s);
+    }
+    return { buys, sells };
+  }
+
+  async function processRange(fromBlock: bigint, toBlock: bigint, opts?: { includeTransfers?: boolean }) {
+    console.log(`[chain ${cfg.chainId}] range ${fromBlock}-${toBlock} ponsCurves=${ponsCurveSet.size}`);
     const created = await getLogsWithRetry(client, {
       address: cfg.factory, event: evCoinCreated, fromBlock, toBlock,
     });
@@ -176,13 +287,41 @@ async function runChain(cfg: ChainConfig, db: ReturnType<typeof createDb>, redis
       await h.onCoinCreated(log as never);
       const curve = curveFromCreated(log);
       if (curve) curveSet.add(curve);
+      const token = tokenFromCreated(log);
+      if (token) tokenSet.add(token);
+    }
+
+    let ponsLaunched: Log[] = [];
+    let ponsGrads: Log[] = [];
+    if (ponsEnv) {
+      const [launched, grads] = await Promise.all([
+        getLogsWithRetry(client, { address: ponsEnv.factory, event: evPonsLaunched, fromBlock, toBlock }),
+        getLogsWithRetry(client, { address: ponsEnv.factory, event: evPonsPoolGrad, fromBlock, toBlock }),
+      ]);
+      ponsLaunched = launched;
+      ponsGrads = grads;
+      ponsLaunched.sort(logOrder);
+      await h.prefetchBlockTimes(ponsLaunched.map((l) => l.blockNumber));
+      for (const group of chunk(ponsLaunched, 4)) {
+        const rows = await Promise.all(group.map((log) => h.onPonsLaunched(log as never)));
+        for (const row of rows) {
+          if (!row) continue;
+          ponsCurveSet.add(row.curve);
+          tokenSet.add(row.token);
+          curveOfToken.set(row.token.toLowerCase(), row.curve);
+        }
+      }
     }
 
     const curves = [...curveSet];
     const knownPools = [...poolSet];
-    const [{ buys, sells, grads }, poolKnown] = await Promise.all([
+    const tokenAddrs = [...tokenSet];
+    const includeTransfers = opts?.includeTransfers !== false;
+    const [{ buys, sells, grads }, poolKnown, transfers, ponsCurve] = await Promise.all([
       fetchCurveLogs(fromBlock, toBlock, curves),
       fetchPoolLogs(fromBlock, toBlock, knownPools),
+      includeTransfers ? fetchTransferLogs(fromBlock, toBlock, tokenAddrs) : Promise.resolve([] as Log[]),
+      fetchPonsCurveLogs(fromBlock, toBlock, [...ponsCurveSet]),
     ]);
 
     const extraPools = grads
@@ -194,40 +333,55 @@ async function runChain(cfg: ChainConfig, db: ReturnType<typeof createDb>, redis
     const swaps = [...poolKnown.swaps, ...poolExtra.swaps];
     const liqs = [...poolKnown.liqs, ...poolExtra.liqs];
 
-    const rest: Array<{ kind: "buy" | "sell" | "grad" | "swap" | "liq"; log: Log }> = [
+    const rest: Array<{ kind: "buy" | "sell" | "grad" | "swap" | "liq" | "xfer" | "ponsBuy" | "ponsSell" | "ponsPool"; log: Log }> = [
       ...buys.map((log) => ({ kind: "buy" as const, log })),
       ...sells.map((log) => ({ kind: "sell" as const, log })),
       ...grads.map((log) => ({ kind: "grad" as const, log })),
       ...swaps.map((log) => ({ kind: "swap" as const, log })),
       ...liqs.map((log) => ({ kind: "liq" as const, log })),
+      ...transfers.map((log) => ({ kind: "xfer" as const, log })),
+      ...ponsCurve.buys.map((log) => ({ kind: "ponsBuy" as const, log })),
+      ...ponsCurve.sells.map((log) => ({ kind: "ponsSell" as const, log })),
+      ...ponsGrads.map((log) => ({ kind: "ponsPool" as const, log })),
     ];
     rest.sort((a, b) => logOrder(a.log, b.log));
     await h.prefetchBlockTimes(rest.map((e) => e.log.blockNumber));
     for (const e of rest) {
+      if (e.kind === "xfer") continue;
       if (e.kind === "buy") await h.onCurveTrade(e.log as never, true);
       else if (e.kind === "sell") await h.onCurveTrade(e.log as never, false);
       else if (e.kind === "grad") {
         const poolId = await h.onGraduated(e.log as never);
         if (poolId) poolSet.add(poolId.toLowerCase() as Hex);
       } else if (e.kind === "liq") await h.onModifyLiquidity(e.log as never);
-      else await h.onPoolSwap(e.log as never);
+      else if (e.kind === "ponsBuy") await h.onPonsCurveTrade(e.log as never, true);
+      else if (e.kind === "ponsSell") await h.onPonsCurveTrade(e.log as never, false);
+      else if (e.kind === "ponsPool") {
+        const poolId = await h.onPonsPoolGraduated(e.log as never);
+        if (poolId) poolSet.add(poolId.toLowerCase() as Hex);
+        const tok = (e.log as Log & { args?: { token?: Address } }).args?.token;
+        if (tok) {
+          const curve = curveOfToken.get(tok.toLowerCase());
+          if (curve) ponsCurveSet.delete(curve);
+        }
+      } else await h.onPoolSwap(e.log as never);
+    }
+    // 互转放在买卖之后处理,便于跳过同一笔成交里的代币划转,避免持仓双计
+    for (const e of rest) {
+      if (e.kind === "xfer") await h.onTokenTransfer(e.log as never);
     }
   }
 
   let batches = 0;
-  while (from <= head) {
-    const to = from + BATCH - 1n > head ? head : from + BATCH - 1n;
-    await processRange(from, to);
+  while (from <= catchUpTo) {
+    const to = from + BATCH - 1n > catchUpTo ? catchUpTo : from + BATCH - 1n;
+    await processRange(from, to, { includeTransfers: stored == null });
     await saveCursor(db, cfg.chainId, to);
     batches++;
-    if (batches % 10 === 0 || to === head) {
-      console.log(`[chain ${cfg.chainId}] backfill ${to}/${head}`);
-    }
+    console.log(`[chain ${cfg.chainId}] backfill ${to}/${catchUpTo}`);
     from = to + 1n;
-    if (from <= head) continue;
-    // 追上头部后再看是否有新块;回填过程中不 sleep
-    head = await getBlockNumberWithRetry(client);
   }
+  head = await getBlockNumberWithRetry(client);
   console.log(`[chain ${cfg.chainId}] backfill done at ${head}`);
 
   // 实时监听必须立刻挂上,不能等毕业池历史 Swap 回填(可能扫上百万块)。
@@ -237,71 +391,167 @@ async function runChain(cfg: ChainConfig, db: ReturnType<typeof createDb>, redis
   //    走 getLogsWithRetry 会自动对半拆分,且 Swap 按 poolId 过滤,量小。
   const liveHead = head;
   let liveFrom = liveHead + 1n;
-  let liveBusy = false;
+  const gate = { liveBusy: false };
+  const LIVE_BATCH = 2_000n;
   async function liveTick() {
-    if (liveBusy) return;
-    liveBusy = true;
+    if (gate.liveBusy) return;
+    gate.liveBusy = true;
     try {
-      const now = await getBlockNumberWithRetry(client);
-      if (now >= liveFrom) {
-        await processRange(liveFrom, now);
-        liveFrom = now + 1n;
-        await saveCursor(db, cfg.chainId, now);
+      const snap = await getBlockNumberWithRetry(client);
+      if (snap < liveFrom) return;
+      const gap = snap - liveFrom + 1n;
+      if (gap > 20n) {
+        console.log(`[chain ${cfg.chainId}] live ${liveFrom} → ${snap} (${gap} blocks)`);
       }
+      let from = liveFrom;
+      while (from <= snap) {
+        const to = from + LIVE_BATCH - 1n > snap ? snap : from + LIVE_BATCH - 1n;
+        await processRange(from, to, { includeTransfers: false });
+        from = to + 1n;
+        await saveCursor(db, cfg.chainId, to);
+      }
+      liveFrom = snap + 1n;
     } catch (e) {
       console.error("[live]", e);
     } finally {
-      liveBusy = false;
+      gate.liveBusy = false;
     }
   }
   setInterval(() => void liveTick(), 2_000);
   void liveTick();
-  console.log(`[chain ${cfg.chainId}] live watchers started from ${liveFrom}`);
+  console.log(`[chain ${cfg.chainId}] live watchers started from ${liveFrom} (pons curves ${ponsCurveSet.size})`);
+  if (ponsEnv) console.log(`[chain ${cfg.chainId}] pons v2 factory ${ponsEnv.factory}`);
+
+  const wantHistorical = process.env.INDEXER_HISTORICAL === "1";
+  if (!wantHistorical) {
+    console.log(`[chain ${cfg.chainId}] skip historical backfill (INDEXER_HISTORICAL=1 to enable)`);
+  } else {
+    void (async () => {
+      if (!ponsEnv || stored == null) return;
+      const until: bigint = stored;
+      let pf: bigint = ponsEnv.deployBlock;
+      if (pf > until) return;
+      console.log(`[chain ${cfg.chainId}] backfilling pons v2 ${pf} → ${until}`);
+      let n = 0;
+      while (pf <= until) {
+        while (gate.liveBusy) await new Promise((r) => setTimeout(r, 150));
+        const pt: bigint = pf + BATCH - 1n > until ? until : pf + BATCH - 1n;
+        const [launched, grads] = await Promise.all([
+          getLogsWithRetry(client, { address: ponsEnv.factory, event: evPonsLaunched, fromBlock: pf, toBlock: pt }),
+          getLogsWithRetry(client, { address: ponsEnv.factory, event: evPonsPoolGrad, fromBlock: pf, toBlock: pt }),
+        ]);
+        launched.sort(logOrder);
+        await h.prefetchBlockTimes(launched.map((l) => l.blockNumber));
+        for (const log of launched) {
+          const row = await h.onPonsLaunched(log as never);
+          if (row) {
+            ponsCurveSet.add(row.curve);
+            tokenSet.add(row.token);
+            curveOfToken.set(row.token.toLowerCase(), row.curve);
+          }
+        }
+        const curveLogs = await fetchPonsCurveLogs(pf, pt, [...ponsCurveSet]);
+        const rest = [
+          ...curveLogs.buys.map((log) => ({ kind: "buy" as const, log })),
+          ...curveLogs.sells.map((log) => ({ kind: "sell" as const, log })),
+          ...grads.map((log) => ({ kind: "grad" as const, log })),
+        ];
+        rest.sort((a, b) => logOrder(a.log, b.log));
+        await h.prefetchBlockTimes(rest.map((e) => e.log.blockNumber));
+        for (const e of rest) {
+          if (e.kind === "buy") await h.onPonsCurveTrade(e.log as never, true);
+          else if (e.kind === "sell") await h.onPonsCurveTrade(e.log as never, false);
+          else {
+            const poolId = await h.onPonsPoolGraduated(e.log as never);
+            if (poolId) poolSet.add(poolId.toLowerCase() as Hex);
+          }
+        }
+        n++;
+        if (n % 10 === 0 || pt === until) {
+          console.log(`[chain ${cfg.chainId}] pons backfill ${pt}/${until}`);
+        }
+        pf = pt + 1n;
+      }
+      console.log(`[chain ${cfg.chainId}] pons v2 backfill done`);
+    })().catch(onErr);
+
+    void (async () => {
+      if (stored == null || tokenRows.length === 0) return;
+      const until: bigint = stored;
+      const addrs = [...tokenSet];
+      let pf: bigint = tokenRows[0].createdAtBlock;
+      for (const t of tokenRows) {
+        if (t.createdAtBlock < pf) pf = t.createdAtBlock;
+      }
+      if (pf > until) return;
+      console.log(`[chain ${cfg.chainId}] backfilling transfers ${pf} → ${until} for ${addrs.length} tokens`);
+      let n = 0;
+      while (pf <= until) {
+        while (gate.liveBusy) await new Promise((r) => setTimeout(r, 150));
+        const pt: bigint = pf + BATCH - 1n > until ? until : pf + BATCH - 1n;
+        const logs = await fetchTransferLogs(pf, pt, addrs);
+        logs.sort(logOrder);
+        if (logs.length > 0) {
+          await h.prefetchBlockTimes(logs.map((l) => l.blockNumber));
+          for (const l of logs) await h.onTokenTransfer(l as never);
+        }
+        n++;
+        if (n % 10 === 0 || pt === until) {
+          console.log(`[chain ${cfg.chainId}] transfer backfill ${pt}/${until}`);
+        }
+        pf = pt + 1n;
+      }
+      console.log(`[chain ${cfg.chainId}] transfer backfill done`);
+    })().catch(onErr);
+
+    void (async () => {
+      const qPools = (await db
+        .select({
+          address: tokens.address,
+          poolId: tokens.poolId,
+          quoteAsset: tokens.quoteAsset,
+          createdAtBlock: tokens.createdAtBlock,
+        })
+        .from(tokens)
+        .where(eq(tokens.chainId, cfg.chainId)))
+        .filter((r) => r.poolId && r.quoteAsset && r.quoteAsset.toLowerCase() !== zeroAddress);
+      if (qPools.length > 0) {
+        console.log(`[chain ${cfg.chainId}] backfilling Q-pool swaps for ${qPools.length} graduated tokens`);
+        for (const t of qPools) {
+          let pf = t.createdAtBlock ?? cfg.deployBlock;
+          if (pf > liveHead) continue;
+          while (pf <= liveHead) {
+            while (gate.liveBusy) await new Promise((r) => setTimeout(r, 150));
+            const pt = pf + BATCH - 1n > liveHead ? liveHead : pf + BATCH - 1n;
+            const logs = await getLogsWithRetry(client, {
+              address: cfg.poolManager,
+              event: evSwap,
+              args: { id: t.poolId as Hex },
+              fromBlock: pf,
+              toBlock: pt,
+            } as GetLogsArgs);
+            logs.sort(logOrder);
+            if (logs.length > 0) {
+              console.log(`[chain ${cfg.chainId}] Q-pool ${t.address.slice(0, 10)} ${logs.length} swaps blocks ${pf}-${pt}`);
+            }
+            await h.prefetchBlockTimes(logs.map((l) => l.blockNumber));
+            for (const l of logs) await h.onPoolSwap(l as never);
+            pf = pt + 1n;
+          }
+        }
+        console.log(`[chain ${cfg.chainId}] Q-pool swap backfill done`);
+      }
+      await h.refreshGraduatedSpotPrices();
+      console.log(`[chain ${cfg.chainId}] graduated spot prices refreshed`);
+    })().catch(onErr);
+  }
 
   setInterval(() => rescoreRecentTokens(db, cfg.chainId).catch(onErr), 10 * 60 * 1000);
-  setInterval(() => backfillMissingFunders(db, client, cfg.chainId).catch(onErr), 20_000);
-  void backfillMissingFunders(db, client, cfg.chainId).catch(onErr);
+  setInterval(() => {
+    if (gate.liveBusy) return;
+    backfillMissingFunders(db, client, cfg.chainId).catch(onErr);
+  }, 20_000);
   void enrichMissingTokenMeta(db, cfg.chainId).catch(onErr);
-
-  void (async () => {
-    const qPools = (await db
-      .select({
-        address: tokens.address,
-        poolId: tokens.poolId,
-        quoteAsset: tokens.quoteAsset,
-        createdAtBlock: tokens.createdAtBlock,
-      })
-      .from(tokens)
-      .where(eq(tokens.chainId, cfg.chainId)))
-      .filter((r) => r.poolId && r.quoteAsset && r.quoteAsset.toLowerCase() !== zeroAddress);
-    if (qPools.length > 0) {
-      console.log(`[chain ${cfg.chainId}] backfilling Q-pool swaps for ${qPools.length} graduated tokens`);
-      for (const t of qPools) {
-        let pf = t.createdAtBlock ?? cfg.deployBlock;
-        if (pf > liveHead) continue;
-        while (pf <= liveHead) {
-          const pt = pf + BATCH - 1n > liveHead ? liveHead : pf + BATCH - 1n;
-          const logs = await getLogsWithRetry(client, {
-            address: cfg.poolManager,
-            event: evSwap,
-            args: { id: t.poolId as Hex },
-            fromBlock: pf,
-            toBlock: pt,
-          } as GetLogsArgs);
-          logs.sort(logOrder);
-          if (logs.length > 0) {
-            console.log(`[chain ${cfg.chainId}] Q-pool ${t.address.slice(0, 10)} ${logs.length} swaps blocks ${pf}-${pt}`);
-          }
-          await h.prefetchBlockTimes(logs.map((l) => l.blockNumber));
-          for (const l of logs) await h.onPoolSwap(l as never);
-          pf = pt + 1n;
-        }
-      }
-      console.log(`[chain ${cfg.chainId}] Q-pool swap backfill done`);
-    }
-    await h.refreshGraduatedSpotPrices();
-    console.log(`[chain ${cfg.chainId}] graduated spot prices refreshed`);
-  })().catch(onErr);
 }
 
 async function main() {

@@ -97,19 +97,8 @@ async function activePins(room: string): Promise<{ pins: Pin[]; changed: boolean
   const pins = raw.map((r) => JSON.parse(r) as Pin);
   // pin 里存的是写入时的默认名;个人资料改名后,下发时用 user_profiles 里的最新名字覆盖
   const chainId = Number(room.split(":")[0]);
-  const wallets = [...new Set(pins.map((p) => p.userId.toLowerCase()).filter((w) => /^0x[0-9a-f]{40}$/.test(w)))];
-  if (pins.length > 0 && wallets.length > 0 && Number.isFinite(chainId)) {
-    const rows = await db
-      .select({ wallet: userProfiles.wallet, username: userProfiles.username })
-      .from(userProfiles)
-      .where(and(eq(userProfiles.chainId, chainId), inArray(userProfiles.wallet, wallets)))
-      .catch(() => [] as Array<{ wallet: string; username: string | null }>);
-    const names = new Map(rows.map((r) => [r.wallet.toLowerCase(), r.username]));
-    for (const p of pins) {
-      const n = names.get(p.userId.toLowerCase());
-      if (n) p.username = n;
-    }
-  }
+  const names = await profileNames(chainId, pins.map((p) => p.userId));
+  for (const p of pins) p.username = displayName(p.userId, names, p.username);
   return { pins, changed: removed > 0 };
 }
 
@@ -144,8 +133,42 @@ function emit(room: string, payload: unknown) {
   });
 }
 
+const ADDR_RE = /^0x[0-9a-f]{40}$/;
+
+function fallbackName(userId: string): string {
+  const s = userId.replace(/^did:privy:/, "");
+  const low = s.toLowerCase();
+  if (ADDR_RE.test(low)) return `${low.slice(0, 6)}…${low.slice(-4)}`;
+  return s.slice(0, 16) || "anon";
+}
+
 function defaultUsername(userId: string): string {
-  return userId.replace(/^did:privy:/, "").slice(0, 16) || "anon";
+  return fallbackName(userId);
+}
+
+/** 个人资料用户名优先;没有则用短地址,不用截断钱包当名字。 */
+function displayName(userId: string, names: Map<string, string>, stored?: string | null): string {
+  const fromProfile = names.get(userId.toLowerCase());
+  if (fromProfile) return fromProfile;
+  const s = (stored ?? "").trim();
+  if (s && s !== "anon" && !/^0x[0-9a-f]+$/i.test(s)) return s;
+  return fallbackName(userId);
+}
+
+async function profileNames(chainId: number, userIds: string[]): Promise<Map<string, string>> {
+  const addrs = [...new Set(userIds.map((id) => id.toLowerCase()).filter((w) => ADDR_RE.test(w)))];
+  const out = new Map<string, string>();
+  if (!Number.isFinite(chainId) || addrs.length === 0) return out;
+  const rows = await db
+    .select({ wallet: userProfiles.wallet, username: userProfiles.username })
+    .from(userProfiles)
+    .where(and(eq(userProfiles.chainId, chainId), inArray(userProfiles.wallet, addrs)))
+    .catch(() => [] as Array<{ wallet: string; username: string | null }>);
+  for (const r of rows) {
+    const n = (r.username ?? "").trim();
+    if (n) out.set(r.wallet.toLowerCase(), n);
+  }
+  return out;
 }
 
 async function ensureUser(userId: string): Promise<void> {
@@ -191,10 +214,11 @@ async function sendHistory(ctx: ClientCtx, room: string) {
     .where(and(eq(chatMessages.chainId, Number(chainId)), eq(chatMessages.room, roomAddr), isNull(chatMessages.deletedAt)))
     .orderBy(desc(chatMessages.createdAt))
     .limit(50);
+  const names = await profileNames(Number(chainId), rows.map((r) => r.userId));
   const messages = rows.reverse().map((r) => ({
     id: r.id.toString(),
     userId: r.userId,
-    username: r.username ?? "anon",
+    username: displayName(r.userId, names, r.username),
     content: r.content,
     holdingShareBps: r.holdingShareBps,
     replyTo: r.replyTo != null ? Number(r.replyTo) : undefined,
@@ -226,6 +250,14 @@ async function handleMessage(ctx: ClientCtx, raw: string) {
     ctx.rooms.add(msg.room);
     if (!rooms.has(msg.room)) rooms.set(msg.room, new Set());
     rooms.get(msg.room)!.add(ctx);
+    const joinChain = Number(msg.room.split(":")[0]);
+    if (ctx.userId && Number.isFinite(joinChain) && !msg.room.startsWith("price:")) {
+      await db
+        .update(chatUsers)
+        .set({ walletAddress: ctx.userId, walletChainId: joinChain })
+        .where(eq(chatUsers.id, ctx.userId))
+        .catch(() => {});
+    }
     // price 房间无历史消息,跳过落库查询
     if (!msg.room.startsWith("price:")) {
       await sendHistory(ctx, msg.room);
@@ -275,10 +307,12 @@ async function handleMessage(ctx: ClientCtx, raw: string) {
       return ctx.ws.send(JSON.stringify({ t: "error", message: `叮住位已满(最多 ${s.pinMax} 条),请稍后再试` }));
     }
     const user = await db.select().from(chatUsers).where(eq(chatUsers.id, ctx.userId)).limit(1);
+    const pinChain = Number(msg.room.split(":")[0]);
+    const pinNames = await profileNames(pinChain, [ctx.userId]);
     const pin: Pin = {
       id: crypto.randomUUID(),
       userId: ctx.userId,
-      username: user[0]?.username ?? "anon",
+      username: displayName(ctx.userId, pinNames, user[0]?.username),
       content,
       expiresAt: Date.now() + s.pinDurationSec * 1000,
       payTxHash: msg.payTxHash,
@@ -327,11 +361,12 @@ async function handleMessage(ctx: ClientCtx, raw: string) {
       }
     }
     lastSent.set(key, now);
+    const dmkNames = await profileNames(chainId, [ctx.userId]);
     emit(msg.room, {
       t: "danmaku",
       room: msg.room,
       id: crypto.randomUUID(),
-      username: user[0]?.username ?? "anon",
+      username: displayName(ctx.userId, dmkNames, user[0]?.username),
       content,
       buyEth,
     });
@@ -363,11 +398,12 @@ async function handleMessage(ctx: ClientCtx, raw: string) {
     const [chainId, roomAddr] = msg.room.split(":");
     const user = await db.select().from(chatUsers).where(eq(chatUsers.id, ctx.userId)).limit(1);
     const u = user[0];
+    const wallet = (ctx.wallet ?? u?.walletAddress ?? ctx.userId).toLowerCase();
 
-    // 持仓徽章:用户开启展示且绑定钱包时,算该房间代币的持仓占比
+    // 持仓徽章:代币房间按发送者钱包算持仓占比(公共聊天无标的,不查)
     let share: number | null = null;
-    if (u?.showHoldings && u.walletAddress && u.walletChainId === Number(chainId) && roomAddr !== "global") {
-      share = await holdingShareBps(db, Number(chainId), u.walletAddress, roomAddr);
+    if (u?.showHoldings !== false && wallet && roomAddr && roomAddr !== "global") {
+      share = await holdingShareBps(db, Number(chainId), wallet, roomAddr);
     }
 
     const [saved] = await db
@@ -383,12 +419,13 @@ async function handleMessage(ctx: ClientCtx, raw: string) {
       })
       .returning();
 
+    const names = await profileNames(Number(chainId), [ctx.userId]);
     const wire: WireMessage = {
       t: "msg",
       id: saved.id.toString(),
       room: msg.room,
       userId: ctx.userId,
-      username: u?.username ?? "anon",
+      username: displayName(ctx.userId, names, u?.username),
       content: saved.content,
       replyTo: msg.replyTo,
       holdingShareBps: share,

@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { useWallets } from "@privy-io/react-auth";
+import { createContext, createElement, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { apiUrl } from "@/lib/apiBase";
 import { buildLoginMessage } from "@/lib/authShared";
 
@@ -18,30 +18,59 @@ function decode(token: string | null): { addr: string; exp: number } | null {
   }
 }
 
+function readStored(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const t = localStorage.getItem(KEY);
+    if (decode(t)) return t;
+    if (t) localStorage.removeItem(KEY);
+  } catch {
+    /* localStorage 不可用 */
+  }
+  return null;
+}
+
+export interface SessionValue {
+  token: string | null;
+  address: string | null;
+  signedIn: boolean;
+  signIn: () => Promise<string | null>;
+  signOut: () => void;
+  /** 没有对当前钱包有效的会话则弹出签名,返回可用 Bearer 令牌 */
+  ensure: () => Promise<string>;
+  signing: boolean;
+  error: string | null;
+}
+
+const SessionContext = createContext<SessionValue | null>(null);
+
 /**
- * 签名登录:用连接的(注入式)钱包对 nonce 签名,换取服务端会话令牌。
- * admin 写接口用它做 Bearer;chat 连接用它鉴权。
+ * 签名登录:用当前连接的钱包对 nonce 签名,换取服务端会话令牌。
+ * 必须挂在 PrivyProvider 内。全站共享一份 token,避免管理页签名后子组件仍带着空令牌保存失败。
  */
-export function useSession() {
+export function SessionProvider({ children }: { children: ReactNode }) {
   const { wallets } = useWallets();
-  const [token, setToken] = useState<string | null>(null);
+  const { user } = usePrivy();
+  const [token, setToken] = useState<string | null>(readStored);
   const [signing, setSigning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    try {
-      const t = localStorage.getItem(KEY);
-      if (decode(t)) setToken(t);
-      else if (t) localStorage.removeItem(KEY);
-    } catch {
-      /* localStorage 不可用 */
-    }
-  }, []);
+  const preferred = (user?.wallet?.address ?? "").toLowerCase();
+  const decoded = decode(token);
+  const address = decoded && (!preferred || decoded.addr === preferred) ? decoded.addr : null;
+  const activeToken = address ? token : null;
 
-  const address = decode(token)?.addr ?? null;
+  const pickWallet = useCallback(() => {
+    const list = wallets ?? [];
+    if (preferred) {
+      const hit = list.find((w) => w.address.toLowerCase() === preferred);
+      if (hit) return hit;
+    }
+    return list[0];
+  }, [wallets, preferred]);
 
   const signIn = useCallback(async () => {
-    const wallet = wallets?.[0];
+    const wallet = pickWallet();
     if (!wallet) {
       setError("请先连接钱包");
       return null;
@@ -50,7 +79,8 @@ export function useSession() {
     setError(null);
     try {
       const addr = wallet.address;
-      const { nonce } = await fetch(apiUrl("/api/auth/nonce")).then((r) => r.json());
+      const { nonce, error: nonceErr } = await fetch(apiUrl("/api/auth/nonce")).then((r) => r.json());
+      if (!nonce) throw new Error(nonceErr ?? "获取登录凭证失败");
       const provider = await wallet.getEthereumProvider();
       const signature = (await provider.request({
         method: "personal_sign",
@@ -71,12 +101,12 @@ export function useSession() {
       setToken(body.token);
       return body.token as string;
     } catch (e) {
-      setError((e as Error).message?.slice(0, 100) ?? "登录失败");
+      setError((e as Error).message?.slice(0, 160) ?? "登录失败");
       return null;
     } finally {
       setSigning(false);
     }
-  }, [wallets]);
+  }, [pickWallet]);
 
   const signOut = useCallback(() => {
     try {
@@ -87,5 +117,32 @@ export function useSession() {
     setToken(null);
   }, []);
 
-  return { token, address, signedIn: !!address, signIn, signOut, signing, error };
+  const ensure = useCallback(async () => {
+    if (activeToken && address) return activeToken;
+    const t = await signIn();
+    if (!t) throw new Error("请先用当前连接的管理员钱包签名登录");
+    return t;
+  }, [activeToken, address, signIn]);
+
+  const value = useMemo<SessionValue>(
+    () => ({
+      token: activeToken,
+      address,
+      signedIn: !!address,
+      signIn,
+      signOut,
+      ensure,
+      signing,
+      error,
+    }),
+    [activeToken, address, signIn, signOut, ensure, signing, error],
+  );
+
+  return createElement(SessionContext.Provider, { value }, children);
+}
+
+export function useSession(): SessionValue {
+  const ctx = useContext(SessionContext);
+  if (!ctx) throw new Error("useSession 必须放在 SessionProvider 内");
+  return ctx;
 }

@@ -11,7 +11,7 @@ import { getAdapter } from "@/lib/adapter";
 export async function POST(req: NextRequest) {
   try {
     const { token, side, amount, minOut, recipient } = await req.json();
-    const adapter = await getAdapter();
+    const adapter = await getAdapter(token);
 
     const txs =
       side === "buy"

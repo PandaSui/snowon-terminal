@@ -10,6 +10,7 @@ import { apiError } from "@/lib/api";
 import { ttlMap } from "@/lib/ttlCache";
 
 const quoteSymCache = ttlMap<string, string>(10 * 60_000);
+const poolCache = ttlMap<string, unknown>(8_000);
 
 const Q96 = 2n ** 96n;
 
@@ -31,6 +32,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ address
   try {
     const { address } = await params;
     const addr = address.toLowerCase() as Address;
+    const cached = poolCache.get(addr);
+    if (cached) return NextResponse.json(cached);
     const [t] = await db
       .select()
       .from(tokens)
@@ -119,7 +122,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ address
     const initQ = t.lpQuoteWei ? whole(BigInt(String(t.lpQuoteWei).split(".")[0] || "0")) : null;
     const initT = t.lpTokenWei ? whole(BigInt(String(t.lpTokenWei).split(".")[0] || "0")) : null;
 
-    return NextResponse.json({
+    const body = {
       symbol: t.symbol,
       quoteSymbol,
       quoteIsEth: quoteIsEth || !t.graduated,
@@ -130,7 +133,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ address
       liquidity,
       current: currentQuote != null || currentToken != null ? { quote: currentQuote, token: currentToken } : null,
       initial: initQ != null || initT != null ? { quote: initQ ?? "0", token: initT ?? "0" } : null,
-    });
+    };
+    poolCache.set(addr, body);
+    return NextResponse.json(body);
   } catch (e) {
     return apiError(e);
   }

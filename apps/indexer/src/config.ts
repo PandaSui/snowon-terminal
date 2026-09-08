@@ -38,6 +38,6 @@ export function clientFor(cfg: ChainConfig): PublicClient {
   // 由 index.ts 的 getLogsWithRetry 处理(viem 不会自动重试 429 错误体)。
   const transport = cfg.wsUrl
     ? webSocket(cfg.wsUrl)
-    : http(cfg.rpcUrl, { batch: false, retryCount: 5, retryDelay: 1000 });
+    : http(cfg.rpcUrl, { batch: false, retryCount: 5, retryDelay: 1000, timeout: 20_000 });
   return createPublicClient({ chain: chainById(cfg.chainId), transport });
 }

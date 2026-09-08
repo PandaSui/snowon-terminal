@@ -343,6 +343,12 @@ export default function TokenPage() {
         <div style={{ minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <span style={{ fontSize: 17, fontWeight: 800 }}>{token.symbol}</span>
+            {token.platformId === "pons" && (
+              <span style={{
+                fontSize: 10, fontWeight: 800, letterSpacing: 0.3, padding: "2px 6px", borderRadius: 4,
+                color: "#00c3ff", background: "rgba(0,195,255,0.12)", border: "1px solid rgba(0,195,255,0.35)",
+              }}>PONS V2</span>
+            )}
             <button
               onClick={() => toggleFavorite(address)}
               title={fav ? tr("unfav") : tr("fav")}

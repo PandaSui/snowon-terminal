@@ -3,9 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import { usePrivy } from "@privy-io/react-auth";
 import { EmojiPicker } from "./EmojiPicker";
-import { EmojiAvatar } from "./EmojiAvatar";
 import { useT } from "@/lib/locale";
 import { useSession } from "@/lib/useSession";
+import { ChatMsgRow, isMineMsg } from "./ChatMsgRow";
 
 interface ChatMsg {
   id: string;
@@ -23,13 +23,15 @@ interface ChatMsg {
  */
 export function ChatBox({ chainId, tokenAddress }: { chainId: number; tokenAddress: string }) {
   const tr = useT();
-  const { authenticated, login } = usePrivy();
+  const { authenticated, login, user } = usePrivy();
   const session = useSession();
+  const myId = (session.address || user?.wallet?.address || "").toLowerCase();
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState("");
   const [dmkInput, setDmkInput] = useState("");
   const [lastError, setLastError] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const room = `${chainId}:${tokenAddress.toLowerCase()}`;
 
   useEffect(() => {
@@ -61,6 +63,11 @@ export function ChatBox({ chainId, tokenAddress }: { chainId: number; tokenAddre
     };
     return () => ws.close();
   }, [room, session.token]);
+
+  useEffect(() => {
+    const el = listRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages.length]);
 
   /** 发送门槛:未连钱包→Privy 登录;已连未签名→签名登录换会话令牌 */
   function ensureAuth(action: () => void) {
@@ -103,20 +110,17 @@ export function ChatBox({ chainId, tokenAddress }: { chainId: number; tokenAddre
 
   return (
     <div style={{ border: "1px solid #1e2329", borderRadius: 10, background: "#0d1117", display: "flex", flexDirection: "column", height: "100%", minHeight: 0, minWidth: 0, overflow: "hidden", boxSizing: "border-box" }}>
-      <div style={{ flex: 1, overflowY: "auto", padding: 12, fontSize: 13 }}>
+      <div ref={listRef} className="col-scroll" style={{ flex: 1, overflowY: "auto", padding: 12, fontSize: 13, minHeight: 0 }}>
         {messages.map((m) => (
-          <div key={m.id} style={{ marginBottom: 6, display: "flex", alignItems: "flex-start", gap: 6 }}>
-            <EmojiAvatar seed={m.userId || m.username} size={18} />
-            <span style={{ minWidth: 0 }}>
-            <span style={{ color: "#f0b90b", fontWeight: 600 }}>{m.username}</span>
-            {m.holdingShareBps != null && m.holdingShareBps > 0 && (
-              <span style={{ marginLeft: 6, fontSize: 11, color: "#0ecb81" }}>
-                {tr("holdShare", { pct: (m.holdingShareBps / 100).toFixed(2) })}
-              </span>
-            )}
-            <span style={{ marginLeft: 8, wordBreak: "break-word" }}>{m.content}</span>
-            </span>
-          </div>
+          <ChatMsgRow
+            key={m.id}
+            mine={isMineMsg(m.userId, myId)}
+            userId={m.userId}
+            username={m.username}
+            content={m.content}
+            holdingShareBps={m.holdingShareBps}
+            avatarSize={18}
+          />
         ))}
       </div>
       {(lastError || session.error) && (

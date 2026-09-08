@@ -138,6 +138,11 @@ export function TradePanel({
     void refreshBals();
   }, [refreshBals, wallet]);
 
+  // 预热报价缓存(曲线储备/sqrtP),输入金额时不再等 500ms+ RPC
+  useEffect(() => {
+    void fetch(apiUrl(`/api/quote?token=${token}&side=buy&amount=50000000000000000`));
+  }, [token]);
+
   useEffect(() => {
     let cancelled = false;
     const handle = setTimeout(async () => {

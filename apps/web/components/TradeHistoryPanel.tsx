@@ -55,6 +55,8 @@ const KINDS = [
   { key: "all", label: "kindAll" },
   { key: "buy", label: "buy" },
   { key: "sell", label: "sell" },
+  { key: "in", label: "transferIn" },
+  { key: "out", label: "transferOut" },
   { key: "add", label: "addLiq" },
   { key: "remove", label: "removeLiq" },
   { key: "burn", label: "burn" },
@@ -64,6 +66,8 @@ const KINDS = [
 const KIND_STYLE: Record<string, { label: string; color: string }> = {
   buy: { label: "buy", color: "#0ecb81" },
   sell: { label: "sell", color: "#f6465d" },
+  in: { label: "transferIn", color: "#5e8bff" },
+  out: { label: "transferOut", color: "#e5a84b" },
   add: { label: "addLiq", color: "#00c3ff" },
   remove: { label: "removeLiq", color: "#f0b90b" },
   burn: { label: "burn", color: "#ff8a00" },
@@ -368,6 +372,7 @@ export function TradeHistoryPanel({
           const k = (t.kind || (t.isBuy ? "buy" : "sell")).toLowerCase();
           const st = KIND_STYLE[k] ?? { label: k, color: "#848e9c" };
           const isSwap = k === "buy" || k === "sell";
+          const isTransfer = k === "in" || k === "out";
           const tw = trackedBy.get(t.trader.toLowerCase());
           const watching = !!tw && tw.watching !== false;
           return (
@@ -380,7 +385,7 @@ export function TradeHistoryPanel({
               }}
             >
               <span style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0 }}>
-                {t.isFirstBuy && (
+                {t.isFirstBuy && isSwap && (
                   <span title={tr("firstBuy")} style={{ display: "inline-flex", flexShrink: 0 }}>
                     <FirstBuyMark />
                   </span>
@@ -446,7 +451,7 @@ export function TradeHistoryPanel({
               </span>
               <span style={{ color: "#eaecef", fontVariantNumeric: "tabular-nums" }}>{fmtTokens(t.tokenAmountWhole)}</span>
               <span style={{ color: st.color, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
-                {k === "burn" ? "—" : fmtQuote(t.ethAmount, "usd", ethUsd)}
+                {k === "burn" || isTransfer ? "—" : fmtQuote(t.ethAmount, "usd", ethUsd)}
               </span>
               <a
                 href={txUrl(CHAIN_ID, t.txHash)}

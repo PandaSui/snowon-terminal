@@ -22,6 +22,7 @@ export function PinBar({ pins }: { pins: Pin[] }) {
   const tr = useT();
   const [idx, setIdx] = useState(0);
   const [fontSize, setFontSize] = useState(MAX_FONT);
+  const [now, setNow] = useState(() => Date.now());
   const viewportRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLSpanElement>(null);
 
@@ -30,6 +31,11 @@ export function PinBar({ pins }: { pins: Pin[] }) {
     const timer = setInterval(() => setIdx((i) => (i + 1) % pins.length), ROTATE_MS);
     return () => clearInterval(timer);
   }, [pins.length]);
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(timer);
+  }, []);
 
   const pin = pins.length > 0 ? pins[idx % pins.length] : null;
 
@@ -91,16 +97,17 @@ export function PinBar({ pins }: { pins: Pin[] }) {
       </div>
     );
   }
-  const remain = Math.max(0, Math.ceil((pin.expiresAt - Date.now()) / 1000));
+  const remain = Math.max(0, Math.ceil((pin.expiresAt - now) / 1000));
 
   return (
     <div
       style={{
         minHeight: 64,
         display: "flex",
-        alignItems: "center",
-        gap: 12,
-        padding: "10px 18px",
+        flexDirection: "column",
+        justifyContent: "center",
+        gap: 4,
+        padding: "8px 12px 10px",
         background: "#10141b",
         border: "1px solid #1e2329",
         borderRadius: 10,
@@ -108,22 +115,26 @@ export function PinBar({ pins }: { pins: Pin[] }) {
         fontSize: 16,
       }}
     >
-      <span title={tr("pinned")} style={{ flexShrink: 0, fontSize: 15, lineHeight: 1 }}>📌</span>
+      {/* 条数/倒计时顶到右上角,正文独占下一行全宽 */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0, minWidth: 0 }}>
+        <span title={tr("pinned")} style={{ flexShrink: 0, fontSize: 15, lineHeight: 1 }}>📌</span>
+        <span style={{ flex: 1, minWidth: 0, fontSize: 11, color: "#848e9c", display: "inline-flex", alignItems: "center", gap: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          <EmojiAvatar seed={pin.userId || pin.username} size={14} /> {pin.username}
+        </span>
+        <span style={{ flexShrink: 0, alignSelf: "flex-start", fontSize: 11, color: "#5e6673", whiteSpace: "nowrap", lineHeight: 1.3 }}>
+          {tr("pinRemain", { i: idx + 1, n: pins.length, s: remain })}
+        </span>
+      </div>
       <div
         ref={viewportRef}
-        style={{ flex: 1, overflow: "hidden", minHeight: 40, display: "flex", alignItems: "center", minWidth: 0 }}
+        style={{ overflow: "hidden", minHeight: 24, width: "100%", minWidth: 0 }}
       >
-        {/* 用户名在内容上方独立一行,滚动内容不会遮挡 */}
-        <div key={pin.id} className="pin-flip" style={{ lineHeight: 1.3, minWidth: 0, width: "100%", display: "flex", flexDirection: "column", gap: 2 }}>
-          <span style={{ fontSize: 11, color: "#848e9c", display: "inline-flex", alignItems: "center", gap: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-            <EmojiAvatar seed={pin.userId || pin.username} size={14} /> {pin.username}
-          </span>
+        <div key={pin.id} className="pin-flip" style={{ width: "max-content", minWidth: "100%", lineHeight: 1.3 }}>
           <span
             ref={contentRef}
             className="pin-flash"
             style={{
               fontSize, display: "inline-block", whiteSpace: "nowrap",
-              // 横向滚动时右侧淡出,提示还有内容
               maskImage: "linear-gradient(90deg, #000 92%, transparent)",
               WebkitMaskImage: "linear-gradient(90deg, #000 92%, transparent)",
             }}
@@ -132,9 +143,6 @@ export function PinBar({ pins }: { pins: Pin[] }) {
           </span>
         </div>
       </div>
-      <span style={{ flexShrink: 0, fontSize: 12, color: "#5e6673" }}>
-        {tr("pinRemain", { i: idx + 1, n: pins.length, s: remain })}
-      </span>
     </div>
   );
 }

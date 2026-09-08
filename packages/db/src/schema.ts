@@ -96,7 +96,7 @@ export const trades = pgTable(
     priceEth: numeric("price_eth", { precision: 40, scale: 18 }).notNull(),
     /** 'curve' | 'pool' —— 毕业前后数据源标识 */
     phase: varchar("phase", { length: 8 }).notNull(),
-    /** buy | sell | add | remove | burn | fee */
+    /** buy | sell | add | remove | burn | fee | in | out */
     kind: varchar("kind", { length: 12 }).notNull().default("buy"),
     blockNumber: bigint("block_number", { mode: "bigint" }).notNull(),
     blockTimestamp: timestamp("block_timestamp", { withTimezone: true }).notNull(),
@@ -248,7 +248,8 @@ export const indexerCursors = pgTable("indexer_cursors", {
 /**
  * 每条链的发射工厂/合约群参数。管理面板(/admin)可编辑,DB 为权威来源;
  * 表为空时由 env(SNOWON_*_<chainId>)自动种子导入,现有部署零迁移。
- * 注意:indexer 是长驻进程,仍读 env 启动参数——改配置后需重启 indexer 生效。
+ * Pons V2 工厂/Hook/起始块存在同表附加列(非第二行 PK),空则回退 env / 默认主网地址。
+ * 注意:indexer 是长驻进程,启动时读 DB 覆盖 env——改配置后需重启 indexer 生效。
  */
 export const chainConfigs = pgTable("chain_configs", {
   chainId: integer("chain_id").primaryKey(),
@@ -263,6 +264,10 @@ export const chainConfigs = pgTable("chain_configs", {
   poolManager: varchar("pool_manager", { length: 42 }).notNull(),
   /** 索引起始区块(工厂部署块) */
   deployBlock: bigint("deploy_block", { mode: "bigint" }).notNull().default(0n),
+  /** Pons V2 发射工厂;空则回退 env PONS_FACTORY_* */
+  ponsFactory: varchar("pons_factory", { length: 42 }),
+  ponsHook: varchar("pons_hook", { length: 42 }),
+  ponsDeployBlock: bigint("pons_deploy_block", { mode: "bigint" }).default(0n),
   enabled: boolean("enabled").notNull().default(true),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
