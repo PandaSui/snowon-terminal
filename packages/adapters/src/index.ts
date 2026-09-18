@@ -17,6 +17,7 @@ export {
   DEFAULT_FAST_WRAPPER, DEFAULT_FAST_HOOK, DEFAULT_FAST_DEPLOY_BLOCK, type FastEnv,
 } from "./fast/adapter.js";
 export * as fastAbis from "./fast/abis.js";
+export { FastLaunchAdapter, type FastTokenHint } from "./fast/tradeAdapter.js";
 
 type AdapterFactory = (client: PublicClient, cfg: ChainConfig) => LaunchpadAdapter;
 

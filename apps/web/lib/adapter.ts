@@ -1,6 +1,6 @@
 import { createPublicClient, http, type Address } from "viem";
 import { and, eq } from "drizzle-orm";
-import { createAdapter, mergePonsConfig, PonsAdapter, type LaunchpadAdapter } from "@terminal/adapters";
+import { createAdapter, mergePonsConfig, mergeFastConfig, PonsAdapter, FastLaunchAdapter, type LaunchpadAdapter } from "@terminal/adapters";
 import { tokens } from "@terminal/db";
 import { chainById } from "./chains";
 import { getChainConfig, toAdapterConfig } from "./chainConfigs";
@@ -9,6 +9,7 @@ import { ttlMap } from "./ttlCache";
 
 let cached: { key: string; adapter: LaunchpadAdapter } | null = null;
 let ponsCached: { key: string; adapter: PonsAdapter } | null = null;
+let fastCached: { key: string; adapter: FastLaunchAdapter } | null = null;
 const tokenMetaCache = ttlMap<string, {
   platformId: string | null;
   curveAddress: string;
@@ -16,6 +17,7 @@ const tokenMetaCache = ttlMap<string, {
   poolId: string | null;
   quoteAsset: string;
   buyTaxBps: number;
+  sellTaxBps: number;
 }>(8_000);
 
 async function snowonAdapter(): Promise<LaunchpadAdapter> {
@@ -48,7 +50,23 @@ async function ponsAdapter(): Promise<PonsAdapter> {
   return adapter;
 }
 
-/** 报价/构交易共用 adapter。传入 token 时按 platformId 选 snowon / pons。 */
+async function fastAdapter(): Promise<FastLaunchAdapter> {
+  const row = await getChainConfig(CHAIN_ID);
+  if (!row) throw new Error(`chain ${CHAIN_ID} 未配置`);
+  const fast = mergeFastConfig(CHAIN_ID, row.poolManager as Address, row);
+  if (!fast) throw new Error("Fast Launch 未配置(池管理器地址缺失)");
+  const key = `${row.chainId}:${row.rpcUrl}:${fast.hook}:${fast.poolManager}:${row.swapRouter}`;
+  if (fastCached?.key === key) return fastCached.adapter;
+  const client = createPublicClient({
+    chain: chainById(row.chainId),
+    transport: http(row.rpcUrl, { batch: false }),
+  });
+  const adapter = new FastLaunchAdapter(CHAIN_ID, client, fast.hook, fast.poolManager, row.swapRouter as Address);
+  fastCached = { key, adapter };
+  return adapter;
+}
+
+/** 报价/构交易共用 adapter。传入 token 时按 platformId 选 snowon / pons / fast。 */
 export async function getAdapter(token?: string): Promise<LaunchpadAdapter> {
   if (token) {
     const addr = token.toLowerCase();
@@ -62,6 +80,7 @@ export async function getAdapter(token?: string): Promise<LaunchpadAdapter> {
           poolId: tokens.poolId,
           quoteAsset: tokens.quoteAsset,
           buyTaxBps: tokens.buyTaxBps,
+          sellTaxBps: tokens.sellTaxBps,
         })
         .from(tokens)
         .where(and(eq(tokens.chainId, CHAIN_ID), eq(tokens.address, addr)))
@@ -79,6 +98,14 @@ export async function getAdapter(token?: string): Promise<LaunchpadAdapter> {
         graduated: tok.graduated,
         poolId: tok.poolId,
         taxBps: tok.buyTaxBps,
+      });
+      return adapter;
+    }
+    if (tok?.platformId === "fast") {
+      const adapter = await fastAdapter();
+      adapter.hint(addr as Address, {
+        buyTaxBps: tok.buyTaxBps,
+        sellTaxBps: tok.sellTaxBps,
       });
       return adapter;
     }
