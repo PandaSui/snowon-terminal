@@ -414,6 +414,46 @@ async function runChain(cfg: ChainConfig, db: ReturnType<typeof createDb>, redis
     }
   }
 
+  // Fast Launch 一次性发现 + 池成交回填。放在主回填之前、并发启动(void),让 Fast 币
+  // 几秒内进库,不必等主回填追完(跳历史后主回填仍可能有几千块 pons 密集段很慢)。游标
+  // 跳历史会漏掉已发射的 Fast 币,故单独扫 wrapper 的 Launched;再按 poolId 回填各自历史
+  // Swap(Fast 币少、按 poolId 过滤量小,宽 getLogs + 拆分兜底)补出 K线,之后 live 接手。
+  if (fastEnv) {
+    void (async () => {
+      try {
+        const fhead = await getBlockNumberWithRetry(client);
+        const launched = await getLogsWithRetry(client, {
+          address: fastEnv.wrapper, event: evFastLaunched,
+          fromBlock: fastEnv.deployBlock, toBlock: fhead,
+        });
+        launched.sort(logOrder);
+        await h.prefetchBlockTimes(launched.map((l) => l.blockNumber));
+        const discovered: Array<{ poolId: Hex; from: bigint }> = [];
+        for (const log of launched) {
+          const res = await h.onFastLaunched(log as never);
+          if (res) {
+            poolSet.add(res.poolId.toLowerCase() as Hex);
+            discovered.push({ poolId: res.poolId, from: log.blockNumber! });
+          }
+        }
+        console.log(`[chain ${cfg.chainId}] fast launch discovery: ${launched.length} tokens`);
+        for (const d of discovered) {
+          const swaps = await getLogsWithRetry(client, {
+            address: cfg.poolManager, event: evSwap, args: { id: d.poolId },
+            fromBlock: d.from, toBlock: fhead,
+          });
+          if (swaps.length === 0) continue;
+          swaps.sort(logOrder);
+          await h.prefetchBlockTimes(swaps.map((l) => l.blockNumber));
+          for (const l of swaps) await h.onPoolSwap(l as never);
+        }
+        console.log(`[chain ${cfg.chainId}] fast pool swap backfill done`);
+      } catch (e) {
+        console.error(`[chain ${cfg.chainId}] fast discovery/backfill failed`, e);
+      }
+    })().catch(onErr);
+  }
+
   let batches = 0;
   while (from <= catchUpTo) {
     const to = from + BATCH - 1n > catchUpTo ? catchUpTo : from + BATCH - 1n;
@@ -463,44 +503,6 @@ async function runChain(cfg: ChainConfig, db: ReturnType<typeof createDb>, redis
   void liveTick();
   console.log(`[chain ${cfg.chainId}] live watchers started from ${liveFrom} (pons curves ${ponsCurveSet.size})`);
   if (ponsEnv) console.log(`[chain ${cfg.chainId}] pons v2 factory ${ponsEnv.factory}`);
-
-  // Fast Launch 一次性发现 + 池成交回填:游标跳历史会漏掉已发射的 Fast 币,单独扫一遍
-  // wrapper 的 Launched 补进 DB,再按 poolId 回填各自的历史 Swap(Fast 币少、按 poolId
-  // 过滤量小,一个宽 getLogs + 拆分兜底即可),补出完整 K线。之后 live 接手后续成交。
-  if (fastEnv) {
-    void (async () => {
-      try {
-        const launched = await getLogsWithRetry(client, {
-          address: fastEnv.wrapper, event: evFastLaunched,
-          fromBlock: fastEnv.deployBlock, toBlock: liveHead,
-        });
-        launched.sort(logOrder);
-        await h.prefetchBlockTimes(launched.map((l) => l.blockNumber));
-        const discovered: Array<{ poolId: Hex; from: bigint }> = [];
-        for (const log of launched) {
-          const res = await h.onFastLaunched(log as never);
-          if (res) {
-            poolSet.add(res.poolId.toLowerCase() as Hex);
-            discovered.push({ poolId: res.poolId, from: log.blockNumber! });
-          }
-        }
-        console.log(`[chain ${cfg.chainId}] fast launch discovery: ${launched.length} tokens`);
-        for (const d of discovered) {
-          const swaps = await getLogsWithRetry(client, {
-            address: cfg.poolManager, event: evSwap, args: { id: d.poolId },
-            fromBlock: d.from, toBlock: liveHead,
-          });
-          if (swaps.length === 0) continue;
-          swaps.sort(logOrder);
-          await h.prefetchBlockTimes(swaps.map((l) => l.blockNumber));
-          for (const l of swaps) await h.onPoolSwap(l as never);
-        }
-        console.log(`[chain ${cfg.chainId}] fast pool swap backfill done`);
-      } catch (e) {
-        console.error(`[chain ${cfg.chainId}] fast discovery/backfill failed`, e);
-      }
-    })().catch(onErr);
-  }
 
   const wantHistorical = process.env.INDEXER_HISTORICAL === "1";
   if (!wantHistorical) {
