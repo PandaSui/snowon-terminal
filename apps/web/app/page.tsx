@@ -227,7 +227,7 @@ export default function DiscoverPage() {
           ["all", t(locale, "all")],
           ...(snowonOn ? [["snowon", t(locale, "platformSnowon")] as const] : []),
           ...(ponsOn ? [["pons", t(locale, "platformPons")] as const] : []),
-          ...(fastOn ? [["fast", "Fast Launch"] as const] : []),
+          ...(fastOn ? [["fast", t(locale, "platformFast")] as const] : []),
         ] as const).map(([key, label]) => (
           <button
             key={key}
