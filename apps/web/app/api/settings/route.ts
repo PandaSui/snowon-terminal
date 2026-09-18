@@ -16,6 +16,7 @@ export async function GET() {
       chainId: CHAIN_ID,
       snowonEnabled: chain?.snowonEnabled !== false,
       ponsEnabled: chain?.ponsEnabled !== false,
+      fastEnabled: chain?.fastEnabled !== false,
     });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });

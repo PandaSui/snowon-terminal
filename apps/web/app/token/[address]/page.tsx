@@ -349,6 +349,12 @@ export default function TokenPage() {
                 color: "#00c3ff", background: "rgba(0,195,255,0.12)", border: "1px solid rgba(0,195,255,0.35)",
               }}>PONS V2</span>
             )}
+            {token.platformId === "fast" && (
+              <span style={{
+                fontSize: 10, fontWeight: 800, letterSpacing: 0.3, padding: "2px 6px", borderRadius: 4,
+                color: "#b15bff", background: "rgba(177,91,255,0.12)", border: "1px solid rgba(177,91,255,0.35)",
+              }}>FAST</span>
+            )}
             <button
               onClick={() => toggleFavorite(address)}
               title={fav ? tr("unfav") : tr("fav")}

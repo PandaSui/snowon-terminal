@@ -112,7 +112,7 @@ export async function GET() {
             SELECT address FROM (
               SELECT address,
                 row_number() OVER (
-                  PARTITION BY CASE WHEN platform_id = 'pons' THEN 'pons' ELSE 'snowon' END
+                  PARTITION BY CASE WHEN platform_id = 'pons' THEN 'pons' WHEN platform_id = 'fast' THEN 'fast' ELSE 'snowon' END
                   ORDER BY created_at DESC
                 ) AS rn
               FROM tokens

@@ -23,18 +23,20 @@ import { t, useLocale } from "@/lib/locale";
 
 const CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? 4663);
 const PLATFORM_KEY = "ui.platform";
-type PlatformFilter = "all" | "snowon" | "pons";
+type PlatformFilter = "all" | "snowon" | "pons" | "fast";
 
 function readPlatform(): PlatformFilter {
   try {
     const v = localStorage.getItem(PLATFORM_KEY);
-    if (v === "snowon" || v === "pons" || v === "all") return v;
+    if (v === "snowon" || v === "pons" || v === "fast" || v === "all") return v;
   } catch { /* ignore */ }
   return "all";
 }
 
-function tokenPlatform(t: HomeToken): "pons" | "snowon" {
-  return t.platformId === "pons" ? "pons" : "snowon";
+function tokenPlatform(t: HomeToken): "pons" | "snowon" | "fast" {
+  if (t.platformId === "pons") return "pons";
+  if (t.platformId === "fast") return "fast";
+  return "snowon";
 }
 
 async function fetchTokens(): Promise<HomeToken[]> {
@@ -96,12 +98,13 @@ export default function DiscoverPage() {
     queryKey: ["launchpad-flags"],
     queryFn: async () => {
       const res = await fetch(apiUrl("/api/settings"));
-      return readJson<{ snowonEnabled?: boolean; ponsEnabled?: boolean }>(res);
+      return readJson<{ snowonEnabled?: boolean; ponsEnabled?: boolean; fastEnabled?: boolean }>(res);
     },
     staleTime: 30_000,
   });
   const snowonOn = platforms?.snowonEnabled !== false;
   const ponsOn = platforms?.ponsEnabled !== false;
+  const fastOn = platforms?.fastEnabled !== false;
   const chat = useGlobalChat(CHAIN_ID);
   const isMobile = useIsMobile();
   const [tab, setTab] = useState<"movers" | "fresh" | "almost" | "graduated" | "chat">("movers");
@@ -116,7 +119,8 @@ export default function DiscoverPage() {
   useEffect(() => {
     if (platform === "pons" && !ponsOn) pickPlatform("all");
     if (platform === "snowon" && !snowonOn) pickPlatform("all");
-  }, [platform, ponsOn, snowonOn]);
+    if (platform === "fast" && !fastOn) pickPlatform("all");
+  }, [platform, ponsOn, snowonOn, fastOn]);
 
   // 管理员钱包(env 主管理员 ∪ DB 协管员)才显示「管理」入口
   const wallet = user?.wallet?.address?.toLowerCase() ?? "";
@@ -126,7 +130,8 @@ export default function DiscoverPage() {
     const all = (tokens ?? []).filter((t) => {
       const p = tokenPlatform(t);
       if (p === "pons" && !ponsOn) return false;
-      if (p !== "pons" && !snowonOn) return false;
+      if (p === "fast" && !fastOn) return false;
+      if (p === "snowon" && !snowonOn) return false;
       return platform === "all" || p === platform;
     });
     const num = (v: string | null) => (v == null ? -Infinity : Number(v));
@@ -144,7 +149,7 @@ export default function DiscoverPage() {
         .filter((t) => t.graduated)
         .sort((a, b) => +new Date(b.graduatedAt ?? b.createdAt) - +new Date(a.graduatedAt ?? a.createdAt)),
     };
-  }, [tokens, platform, snowonOn, ponsOn]);
+  }, [tokens, platform, snowonOn, ponsOn, fastOn]);
 
   const columns = [
     { key: "movers" as const, title: t(locale, "movers"), short: t(locale, "movers"), dot: "#f6465d", tokens: lists.movers, empty: "—" },
@@ -211,7 +216,8 @@ export default function DiscoverPage() {
       <FavoritesBar tokens={(tokens ?? []).filter((t) => {
         const p = tokenPlatform(t);
         if (p === "pons" && !ponsOn) return false;
-        if (p !== "pons" && !snowonOn) return false;
+        if (p === "fast" && !fastOn) return false;
+        if (p === "snowon" && !snowonOn) return false;
         return platform === "all" || p === platform;
       })} />
 
@@ -221,6 +227,7 @@ export default function DiscoverPage() {
           ["all", t(locale, "all")],
           ...(snowonOn ? [["snowon", t(locale, "platformSnowon")] as const] : []),
           ...(ponsOn ? [["pons", t(locale, "platformPons")] as const] : []),
+          ...(fastOn ? [["fast", "Fast Launch"] as const] : []),
         ] as const).map(([key, label]) => (
           <button
             key={key}
@@ -229,9 +236,9 @@ export default function DiscoverPage() {
             style={{
               padding: "3px 10px", fontSize: 11, fontWeight: 800, cursor: "pointer",
               borderRadius: 6,
-              border: `1px solid ${platform === key ? (key === "pons" ? "#00c3ff" : "#f0b90b") : "#2b3139"}`,
+              border: `1px solid ${platform === key ? (key === "pons" ? "#00c3ff" : key === "fast" ? "#b15bff" : "#f0b90b") : "#2b3139"}`,
               background: platform === key ? "#1c1f26" : "transparent",
-              color: platform === key ? (key === "pons" ? "#00c3ff" : "#f0b90b") : "#848e9c",
+              color: platform === key ? (key === "pons" ? "#00c3ff" : key === "fast" ? "#b15bff" : "#f0b90b") : "#848e9c",
             }}
           >
             {label}

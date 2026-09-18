@@ -310,6 +310,18 @@ function TokenCardInner({ t, showMultiplier }: { t: HomeToken; showMultiplier?: 
                     PONS
                   </span>
                 )}
+                {t.platformId === "fast" && (
+                  <span
+                    title="Fast Launch"
+                    style={{
+                      flexShrink: 0, fontSize: 9, fontWeight: 800, letterSpacing: 0.3,
+                      padding: "1px 5px", borderRadius: 3, color: "#b15bff",
+                      background: "rgba(177,91,255,0.12)", border: "1px solid rgba(177,91,255,0.35)",
+                    }}
+                  >
+                    FAST
+                  </span>
+                )}
                 {t.antiBundle && <span title="antiBundle" style={{ fontSize: 10 }}>🛡</span>}
               </div>
               <div style={{ fontSize: 11, color: "#848e9c", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>

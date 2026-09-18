@@ -6,6 +6,10 @@ import {
   DEFAULT_PONS_FACTORY,
   DEFAULT_PONS_HOOK,
   DEFAULT_PONS_DEPLOY_BLOCK,
+  loadFastEnv,
+  DEFAULT_FAST_WRAPPER,
+  DEFAULT_FAST_HOOK,
+  DEFAULT_FAST_DEPLOY_BLOCK,
   type ChainConfig,
 } from "@terminal/adapters";
 import { db } from "./db";
@@ -126,6 +130,7 @@ export async function getChainConfig(chainId: number): Promise<ChainConfigRow | 
     const env = loadChainConfigsFromEnv().find((c) => c.chainId === chainId);
     if (env) {
       const pons = loadPonsEnv(env.chainId, env.poolManager);
+      const fast = loadFastEnv(env.chainId, env.poolManager);
       row = {
         chainId: env.chainId,
         platformId: env.platformId,
@@ -141,8 +146,12 @@ export async function getChainConfig(chainId: number): Promise<ChainConfigRow | 
         ponsFactory: pons?.factory ?? DEFAULT_PONS_FACTORY,
         ponsHook: pons?.hook ?? DEFAULT_PONS_HOOK,
         ponsDeployBlock: pons?.deployBlock ?? DEFAULT_PONS_DEPLOY_BLOCK,
+        fastWrapper: fast?.wrapper ?? DEFAULT_FAST_WRAPPER,
+        fastHook: fast?.hook ?? DEFAULT_FAST_HOOK,
+        fastDeployBlock: fast?.deployBlock ?? DEFAULT_FAST_DEPLOY_BLOCK,
         snowonEnabled: true,
         ponsEnabled: true,
+        fastEnabled: true,
         enabled: true,
         updatedAt: new Date(0),
       };
