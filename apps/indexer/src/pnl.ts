@@ -36,8 +36,13 @@ export async function applyTradeToPosition(
       ${isBuy ? 1 : 0}, ${isBuy ? 0 : 1},
       ${isBuy ? ts : null}, ${ts})
     ON CONFLICT (chain_id, wallet, token_address) DO UPDATE SET
-      balance = positions.balance::numeric
-        ${sql.raw(isBuy ? "+" : "-")} ${tokenAmount.toString()},
+      balance = ${sql.raw(
+        isBuy
+          ? `positions.balance::numeric + ${tokenAmount.toString()}`
+          // 卖出加 GREATEST(...,0),与 applyTransferToPosition 的转出对齐:卖出量>持仓
+          // (买入历史被跳/顺序/在别的钱包)时钳到 0,持仓不为负。
+          : `GREATEST(positions.balance::numeric - ${tokenAmount.toString()}, 0)`,
+      )},
       cost_basis_eth = ${sql.raw(
         isBuy
           ? `COALESCE(positions.cost_basis_eth::numeric, 0) + ${ethAmount.toString()}`
