@@ -61,39 +61,42 @@ export async function computeBundleScore(db: Db, chainId: number, token: string,
     ) t
   `)) as unknown as Array<{ top10: string | null }>;
   const totalHeldRows = (await db.execute(sql`
-    SELECT COALESCE(SUM(balance::numeric), 0) AS total FROM positions
+    SELECT COALESCE(SUM(CASE WHEN balance::numeric > 0 THEN balance::numeric ELSE 0 END), 0) AS total
+    FROM positions
     WHERE chain_id = ${chainId} AND token_address = ${token}
   `)) as unknown as Array<{ total: string }>;
   const top10 = Number(holderRows[0].top10 ?? 0);
   const totalHeld = Number(totalHeldRows[0].total);
   const top10HolderShare = totalHeld > 0 ? top10 / totalHeld : 0;
 
-  const score = Math.round(
-    100 * (0.35 * launchBlockBuyShare + 0.3 * sameFunderShare + 0.15 * creatorBuyShare + 0.2 * top10HolderShare),
+  // 份额本应 0-1,写 numeric(6,4)。既有 PNL 问题会让 positions 出现负 balance,拉低
+  // totalHeld,使 top10HolderShare 远超 1 → 写入溢出(22003)。分母已改为只算正持仓,
+  // 这里再统一 clamp 到 [0,1] 兜底,score 也用 clamp 后的值,避免虚高。
+  const clamp01 = (x: number) => Math.min(1, Math.max(0, Number.isFinite(x) ? x : 0));
+  const lbShare = clamp01(launchBlockBuyShare);
+  const sfShare = clamp01(sameFunderShare);
+  const cbShare = clamp01(creatorBuyShare);
+  const t10Share = clamp01(top10HolderShare);
+
+  const score = Math.min(
+    100,
+    Math.round(100 * (0.35 * lbShare + 0.3 * sfShare + 0.15 * cbShare + 0.2 * t10Share)),
   );
 
+  const cols = {
+    score,
+    launchBlockBuyShare: lbShare.toFixed(4),
+    sameFunderShare: sfShare.toFixed(4),
+    creatorBuyShare: cbShare.toFixed(4),
+    top10HolderShare: t10Share.toFixed(4),
+    computedAt: new Date(),
+  };
   await db
     .insert(bundleScores)
-    .values({
-      chainId,
-      tokenAddress: token,
-      score: Math.min(score, 100),
-      launchBlockBuyShare: launchBlockBuyShare.toFixed(4),
-      sameFunderShare: sameFunderShare.toFixed(4),
-      creatorBuyShare: creatorBuyShare.toFixed(4),
-      top10HolderShare: top10HolderShare.toFixed(4),
-      computedAt: new Date(),
-    })
+    .values({ chainId, tokenAddress: token, ...cols })
     .onConflictDoUpdate({
       target: [bundleScores.chainId, bundleScores.tokenAddress],
-      set: {
-        score: Math.min(score, 100),
-        launchBlockBuyShare: launchBlockBuyShare.toFixed(4),
-        sameFunderShare: sameFunderShare.toFixed(4),
-        creatorBuyShare: creatorBuyShare.toFixed(4),
-        top10HolderShare: top10HolderShare.toFixed(4),
-        computedAt: new Date(),
-      },
+      set: cols,
     });
 }
 

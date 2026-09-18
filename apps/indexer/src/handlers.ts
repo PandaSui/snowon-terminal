@@ -288,18 +288,22 @@ export class EventHandlers {
     const n = Number(priceEth);
     // 6 ETH / 1e-16 这种脏价不写 latest_prices,否则顶栏市值/涨跌/池子全坏
     if (!Number.isFinite(n) || n <= 1e-14 || n >= 0.01) return;
+    // graduationProgress 是 numeric(6,4)(整数部分仅 2 位),clamp 防异常值溢出(22003)
+    const gp = graduationProgress == null
+      ? null
+      : Math.min(9.9999, Math.max(0, Number(graduationProgress) || 0)).toFixed(4);
     await this.db
       .insert(latestPrices)
       .values({
         chainId: this.cfg.chainId,
         tokenAddress,
         priceEth,
-        graduationProgress,
+        graduationProgress: gp,
         updatedAt: ts,
       })
       .onConflictDoUpdate({
         target: [latestPrices.chainId, latestPrices.tokenAddress],
-        set: { priceEth, graduationProgress, updatedAt: ts },
+        set: { priceEth, graduationProgress: gp, updatedAt: ts },
       });
   }
 
