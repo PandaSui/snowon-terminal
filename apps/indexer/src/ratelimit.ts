@@ -34,16 +34,20 @@ export interface RpcLimiterOptions {
   maxRetries: number;
 }
 
-function is429(err: unknown): boolean {
-  const code =
-    (err as { code?: number })?.code ??
+function isRateLimited(err: unknown): boolean {
+  const status =
     (err as { status?: number })?.status ??
+    (err as { code?: number })?.code ??
     (err as { cause?: { status?: number } })?.cause?.status;
-  if (code === 429) return true;
   const text = `${(err as { details?: string })?.details ?? ""} ${
     (err as { shortMessage?: string })?.shortMessage ?? ""
   } ${(err as Error)?.message ?? ""}`;
-  return /\b429\b|too many requests|rate ?limit/i.test(text);
+  // 标准 429 限流
+  if (status === 429 || /\b429\b|too many requests|rate ?limit/i.test(text)) return true;
+  // 403 + Cloudflare 人机验证挑战:官方公共 RPC 持续高频会偶发弹 challenge(返回 HTML 而非
+  // JSON),退避冷却几秒后自行恢复。不当限流处理就会因非 JSON 响应未捕获而崩溃(exit 1)。
+  if (status === 403 && /cf-mitigated|just a moment|cloudflare|enable javascript|challenge/i.test(text)) return true;
+  return false;
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -80,11 +84,11 @@ export class RpcLimiter {
           this.penalty = 0; // 成功一次即解除退避强度
           return out;
         } catch (err) {
-          if (is429(err)) {
-            this.applyBackoff(); // 任何 429 都置全局暂停,保护节点(与是否重试无关)
+          if (isRateLimited(err)) {
+            this.applyBackoff(); // 429 或 403/CF 挑战都置全局暂停,保护节点(与是否重试无关)
             if (attempt < this.opts.maxRetries) continue; // 还有重试额度 → 等暂停解除后重试
           }
-          throw err; // 非 429、或重试用尽:抛给上层(上层重试时会被全局暂停挡住)
+          throw err; // 非限流、或重试用尽:抛给上层(上层重试时会被全局暂停挡住)
         }
       }
     } finally {
@@ -128,17 +132,21 @@ export class RpcLimiter {
     // 多个并发 429 取 max、不累加,避免暂停被叠加成很长
     this.pausedUntil = Math.max(this.pausedUntil, Date.now() + backoff);
     console.log(
-      `  [ratelimit] 429 → 全局暂停 ${(backoff / 1000).toFixed(1)}s (penalty=${this.penalty})`,
+      `  [ratelimit] 限流/CF挑战 → 全局暂停 ${(backoff / 1000).toFixed(1)}s (penalty=${this.penalty})`,
     );
   }
 }
 
-/** 进程级共享限流器:所有链、所有请求共用一个,严格约束打到节点的总并发。 */
+/**
+ * 进程级共享限流器:所有链、所有请求共用一个,严格约束打到节点的总并发。
+ * 官方公共 RPC 有 Cloudflare 反 bot:并发压到 2 更像正常客户端、少触发 challenge;
+ * 触发时靠 403/429 退避冷却,base 调长(3s→45s)给 CF 足够冷却时间。全部 env 可调。
+ */
 export const sharedLimiter = new RpcLimiter({
-  maxConcurrent: Math.max(1, Number(process.env.RPC_MAX_CONCURRENT ?? 4)),
-  baseBackoffMs: Number(process.env.RPC_BACKOFF_MS ?? 1500),
-  maxBackoffMs: Number(process.env.RPC_MAX_BACKOFF_MS ?? 30_000),
-  maxRetries: Number(process.env.RPC_MAX_RETRIES ?? 8),
+  maxConcurrent: Math.max(1, Number(process.env.RPC_MAX_CONCURRENT ?? 2)),
+  baseBackoffMs: Number(process.env.RPC_BACKOFF_MS ?? 3000),
+  maxBackoffMs: Number(process.env.RPC_MAX_BACKOFF_MS ?? 45_000),
+  maxRetries: Number(process.env.RPC_MAX_RETRIES ?? 10),
 });
 
 /**
