@@ -42,10 +42,11 @@ const evPonsPoolGrad = parseAbiItem(
   "event PoolGraduated(address indexed token, uint256 positionId, uint256 tokenAmount, uint256 pairTokenAmount)",
 );
 
-// 回填步长。原为 80n——为 Alchemy(限流严、1800 条 pons 曲线按地址分片易打满)保守设的。
-// 换官方 RPC(不限块范围/并发,实测 20 万块 getLogs、8 并发零压力)+ 全局限流器兜底后,
-// 放大到 2000 与 LIVE_BATCH 一致,回填提速约 25 倍;env INDEXER_BACKFILL_BATCH 可调回。
-const BATCH = BigInt(process.env.INDEXER_BACKFILL_BATCH ?? 2000);
+// 回填步长。曾试图放大到 2000 想加速,但实测:pons 发射高峰段单批 2000 块事件海量,
+// handler+DB 处理一批要几分钟、游标反而卡住不推进,比小批更糟(瓶颈是处理量不是 RPC)。
+// 回退到原作者的保守值 80,保证游标平滑推进;env INDEXER_BACKFILL_BATCH 可在确认稀疏
+// 的场景手动调大。(按事件拉取阈值保留 2000,那是给实时 LIVE_BATCH=2000 用的,与此无关)
+const BATCH = BigInt(process.env.INDEXER_BACKFILL_BATCH ?? 80);
 const ADDR_CHUNK = 80;
 
 function chunk<T>(arr: T[], n: number): T[][] {
