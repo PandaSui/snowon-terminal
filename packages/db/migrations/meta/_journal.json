@@ -92,6 +92,13 @@
       "when": 1788700000000,
       "tag": "0011_launchpad_enabled",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1788710000000,
+      "tag": "0012_fast_config",
+      "breakpoints": true
     }
   ]
 }

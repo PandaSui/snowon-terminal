@@ -4,7 +4,7 @@ import { parseAbiItem, type Address, type Hex, type Log } from "viem";
 import { eq } from "drizzle-orm";
 import { zeroAddress } from "viem";
 import { chainConfigs, createDb, tokens } from "@terminal/db";
-import { loadChainConfigsFromEnv, mergePonsConfig, type ChainConfig, type PonsEnv } from "@terminal/adapters";
+import { loadChainConfigsFromEnv, mergePonsConfig, mergeFastConfig, type ChainConfig, type PonsEnv, type FastEnv } from "@terminal/adapters";
 import { clientFor } from "./config.js";
 import { EventHandlers } from "./handlers.js";
 import { rescoreRecentTokens } from "./bundle.js";
@@ -40,6 +40,9 @@ const evPonsSell = parseAbiItem(
 );
 const evPonsPoolGrad = parseAbiItem(
   "event PoolGraduated(address indexed token, uint256 positionId, uint256 tokenAmount, uint256 pairTokenAmount)",
+);
+const evFastLaunched = parseAbiItem(
+  "event Launched(address indexed token, address indexed creator, uint16 buyTaxBps, uint16 sellTaxBps)",
 );
 
 // 回填步长。曾试图放大到 2000 想加速,但实测:pons 发射高峰段单批 2000 块事件海量,
@@ -159,13 +162,16 @@ async function runChain(cfg: ChainConfig, db: ReturnType<typeof createDb>, redis
   const [cfgRow] = await db.select().from(chainConfigs).where(eq(chainConfigs.chainId, cfg.chainId)).limit(1);
   const snowonOn = cfgRow?.enabled !== false && cfgRow?.snowonEnabled !== false;
   const ponsOn = cfgRow?.enabled !== false && cfgRow?.ponsEnabled !== false;
+  const fastOn = cfgRow?.enabled !== false && cfgRow?.fastEnabled !== false;
   const ponsEnv = ponsOn ? await resolvePons(cfg, db) : null;
+  const fastEnv = fastOn ? mergeFastConfig(cfg.chainId, cfg.poolManager, cfgRow) : null;
   const h = new EventHandlers(
     db, client, cfg, publish,
     ponsEnv ? { factory: ponsEnv.factory, hook: ponsEnv.hook } : undefined,
+    fastEnv ? { wrapper: fastEnv.wrapper, hook: fastEnv.hook } : undefined,
   );
   const onErr = (e: unknown) => console.error(e);
-  console.log(`[chain ${cfg.chainId}] launchpads snowon=${snowonOn} pons=${!!ponsEnv}`);
+  console.log(`[chain ${cfg.chainId}] launchpads snowon=${snowonOn} pons=${!!ponsEnv} fast=${!!fastEnv}`);
 
   const tokenRows = await db
     .select({
@@ -178,9 +184,13 @@ async function runChain(cfg: ChainConfig, db: ReturnType<typeof createDb>, redis
     })
     .from(tokens)
     .where(eq(tokens.chainId, cfg.chainId));
-  const liveRows = tokenRows.filter((r) => (r.platformId === "pons" ? ponsOn : snowonOn));
+  const liveRows = tokenRows.filter((r) =>
+    r.platformId === "pons" ? ponsOn : r.platformId === "fast" ? fastOn : snowonOn,
+  );
+  // 只有 snowon 平台有真实曲线要扫 Buy/Sell;fast 的 curveAddress 是占位(SnowConfigHook),
+  // 必须用白名单 === "snowon"(而非 !== "pons"),否则会对占位地址发无意义的曲线 getLogs。
   const curveSet = new Set<Address>(
-    liveRows.filter((r) => r.platformId !== "pons").map((r) => r.curveAddress.toLowerCase() as Address),
+    liveRows.filter((r) => r.platformId === "snowon").map((r) => r.curveAddress.toLowerCase() as Address),
   );
   // 已毕业的 Pons 走 V4 池,live 不必再扫曲线 Buy/Sell(上千条地址会把 RPC 打满 429)
   const ponsCurveSet = new Set<Address>(
@@ -323,6 +333,24 @@ async function runChain(cfg: ChainConfig, db: ReturnType<typeof createDb>, redis
           ponsCurveSet.add(row.curve);
           tokenSet.add(row.token);
           curveOfToken.set(row.token.toLowerCase(), row.curve);
+        }
+      }
+    }
+
+    // Fast Launch:SnowLaunchWrapper.Launched,append-only,一发射即毕业(SNOW 池已存在)。
+    // 仿 pons launched 的"提前处理"位置:在 fetchPoolLogs 之前把 token/poolId 落库,
+    // 同批次内"发射后立刻有人买"的池 Swap 才能被下面的 fetchPoolLogs 一并捕获。
+    if (fastEnv) {
+      const fastLaunched = await getLogsWithRetry(client, {
+        address: fastEnv.wrapper, event: evFastLaunched, fromBlock, toBlock,
+      });
+      fastLaunched.sort(logOrder);
+      await h.prefetchBlockTimes(fastLaunched.map((l) => l.blockNumber));
+      for (const log of fastLaunched) {
+        const res = await h.onFastLaunched(log as never);
+        if (res) {
+          poolSet.add(res.poolId.toLowerCase() as Hex);
+          tokenSet.add(res.token.toLowerCase() as Address);
         }
       }
     }

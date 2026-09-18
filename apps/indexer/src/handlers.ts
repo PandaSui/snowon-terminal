@@ -4,7 +4,7 @@ import { eq, and, sql, inArray } from "drizzle-orm";
 import type { Db } from "@terminal/db";
 import { latestPrices, tokens, trades, wallets } from "@terminal/db";
 import type { ChainConfig } from "@terminal/adapters";
-import { poolIdOf, ponsAbis, readPoolSqrtP, snowAbis, snowCurveMath } from "@terminal/adapters";
+import { poolIdOf, poolIdOfFastToken, ponsAbis, fastAbis, readPoolSqrtP, snowAbis, snowCurveMath, FAST_QUOTE, SNOW_ETH_POOL_FEE, SNOW_ETH_POOL_SPACING } from "@terminal/adapters";
 import { applyTradeToPosition, applyTransferToPosition } from "./pnl.js";
 import { enqueueFirstFunder } from "./funding.js";
 import { formatPriceEth, shareDecimal } from "./price.js";
@@ -59,6 +59,7 @@ export class EventHandlers {
     /** Redis 发布器:把实时价格推给 web 层(K线 subscribeBars / 榜单) */
     private readonly publish: (channel: string, payload: unknown) => void,
     private readonly pons?: { factory: Address; hook: Address },
+    private readonly fast?: { wrapper: Address; hook: Address },
   ) {}
 
   private cacheBlockTime(blockNumber: bigint, ts: Date) {
@@ -106,6 +107,14 @@ export class EventHandlers {
     const key = curveAddress.toLowerCase();
     const hit = this.quoteMeta.get(key);
     if (hit) return hit;
+    // Fast Launch 币的 curveAddress 是 SnowConfigHook 占位,没有曲线合约的
+    // quote/quoteEthFee/quoteEthSpacing;它固定 SNOW 计价,ETH/SNOW 参考池链上核实
+    // fee=2500/spacing=50。据此短路,让 quoteLegToEth/onPoolSwap 照常换算成 ETH。
+    if (this.fast && key === this.fast.hook.toLowerCase()) {
+      const meta = { quote: FAST_QUOTE, fee: SNOW_ETH_POOL_FEE, spacing: SNOW_ETH_POOL_SPACING };
+      this.quoteMeta.set(key, meta);
+      return meta;
+    }
     try {
       const curve = key as Address;
       const [quote, fee, spacing] = await Promise.all([
@@ -762,6 +771,10 @@ export class EventHandlers {
       protocol.add(this.pons.factory.toLowerCase());
       protocol.add(this.pons.hook.toLowerCase());
     }
+    if (this.fast) {
+      protocol.add(this.fast.wrapper.toLowerCase());
+      protocol.add(this.fast.hook.toLowerCase());
+    }
     if (protocol.has(from) || protocol.has(to)) return;
     if (burnSet.has(from)) return;
 
@@ -908,6 +921,64 @@ export class EventHandlers {
     this.tokenMeta.set(token, { curveAddress: curve, graduated: false });
     enqueueFirstFunder(this.db, this.client, this.cfg.chainId, a.deployer);
     return { token, curve };
+  }
+
+  /** Fast Launch(SnowLaunchWrapper.Launched)→ tokens(platformId=fast,一发射即毕业) */
+  async onFastLaunched(log: Log & { args: LogArgs }): Promise<{ token: Address; poolId: Hex } | null> {
+    if (!this.fast) return null;
+    const a = log.args as unknown as {
+      token: Address; creator: Address; buyTaxBps: number | bigint; sellTaxBps: number | bigint;
+    };
+    const token = a.token.toLowerCase() as Address;
+    const creator = a.creator.toLowerCase();
+    const ts = await this.blockTime(log.blockNumber!);
+    const hook = this.fast.hook.toLowerCase() as Address;
+    const poolId = poolIdOfFastToken(token, hook);
+
+    let name = "Token";
+    let symbol = "TKN";
+    try {
+      const [nm, sy] = await Promise.all([
+        this.client.readContract({ address: token, abi: fastAbis.fastTokenAbi, functionName: "name" }).catch(() => "Token"),
+        this.client.readContract({ address: token, abi: fastAbis.fastTokenAbi, functionName: "symbol" }).catch(() => "TKN"),
+      ]);
+      name = String(nm || "Token");
+      symbol = String(sy || "TKN");
+    } catch (e) {
+      console.error(`[fast] meta ${token}`, e);
+    }
+
+    await this.db.insert(tokens).values({
+      chainId: this.cfg.chainId,
+      address: token,
+      platformId: "fast",
+      // 占位:Fast 无曲线,填 SnowConfigHook。loadQuoteMeta 据此走 SNOW→ETH 换算短路。
+      curveAddress: hook,
+      creator,
+      feeReceiver: creator, // Launched 事件不带 feeReceiver,默认 creator
+      name,
+      symbol,
+      quoteAsset: FAST_QUOTE,
+      quoteDecimals: 18,
+      buyTaxBps: Number(a.buyTaxBps ?? 0),
+      sellTaxBps: Number(a.sellTaxBps ?? 0),
+      antiSnipe: false,
+      antiBundle: false,
+      curveP0: "0",
+      curveSlope: "0",
+      graduationThreshold: null,
+      graduated: true, // 一发射即毕业:SNOW 池立即存在,poolId 当场可算
+      graduatedAt: ts,
+      poolId,
+      createdAtBlock: log.blockNumber!,
+      createdAt: ts,
+      createdTx: log.transactionHash!,
+    }).onConflictDoNothing();
+
+    this.tokenMeta.set(token, { curveAddress: hook, graduated: true });
+    enqueueFirstFunder(this.db, this.client, this.cfg.chainId, creator as Address);
+    void applyOffchainMeta(this.db, this.cfg.chainId, token);
+    return { token, poolId };
   }
 
   async onPonsCurveTrade(log: Log & { args: LogArgs }, isBuy: boolean) {

@@ -271,6 +271,11 @@ export const chainConfigs = pgTable("chain_configs", {
   /** 是否在终端展示/索引该发射台;删除发射台时置 false,已索引代币保留 */
   snowonEnabled: boolean("snowon_enabled").notNull().default(true),
   ponsEnabled: boolean("pons_enabled").notNull().default(true),
+  /** Fast Launch(SNOW 配对 + SnowConfigHook 池,无绑定曲线)发射器;空则回退 env FAST_WRAPPER_* */
+  fastWrapper: varchar("fast_wrapper", { length: 42 }),
+  fastHook: varchar("fast_hook", { length: 42 }),
+  fastDeployBlock: bigint("fast_deploy_block", { mode: "bigint" }).default(0n),
+  fastEnabled: boolean("fast_enabled").notNull().default(true),
   enabled: boolean("enabled").notNull().default(true),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
