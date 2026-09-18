@@ -42,7 +42,10 @@ const evPonsPoolGrad = parseAbiItem(
   "event PoolGraduated(address indexed token, uint256 positionId, uint256 tokenAmount, uint256 pairTokenAmount)",
 );
 
-const BATCH = 80n;
+// 回填步长。原为 80n——为 Alchemy(限流严、1800 条 pons 曲线按地址分片易打满)保守设的。
+// 换官方 RPC(不限块范围/并发,实测 20 万块 getLogs、8 并发零压力)+ 全局限流器兜底后,
+// 放大到 2000 与 LIVE_BATCH 一致,回填提速约 25 倍;env INDEXER_BACKFILL_BATCH 可调回。
+const BATCH = BigInt(process.env.INDEXER_BACKFILL_BATCH ?? 2000);
 const ADDR_CHUNK = 80;
 
 function chunk<T>(arr: T[], n: number): T[][] {
@@ -252,8 +255,10 @@ async function runChain(cfg: ChainConfig, db: ReturnType<typeof createDb>, redis
     const sells: Log[] = [];
     if (curves.length === 0) return { buys, sells };
     const span = toBlock - fromBlock;
-    // 1800 条曲线按地址分片会把 RPC 打满;500 块以内改为按事件拉取,超时则回退分片
-    if (curves.length > 200 && span <= 800n) {
+    // 1800 条曲线按地址分片会把 RPC 打满;一定块范围内改为按事件拉取(不带地址、本地过滤),
+    // 超时则回退分片。阈值随 BATCH 放大到 2000(官方 RPC 大范围 getLogs 无压力,超限有
+    // getLogsWithRetry 对半拆兜底),避免放大 BATCH 后 pons 曲线退化成分片惊群。
+    if (curves.length > 200 && span <= 2000n) {
       try {
         const [b, s] = await Promise.all([
           getLogsWithRetry(client, { event: evPonsBuy, fromBlock, toBlock }),
