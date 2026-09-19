@@ -32,6 +32,25 @@ const TRANSFER_IN_LOG_OFFSET = 1_000_000;
  * 曲线阶段的 Buy/Sell 事件直接带 ethIn/ethOut(用户视角的 ETH 数量),
  * 无需再做 Q 换算;priceEth = ethAmount / tokenAmount。
  */
+/**
+ * Fast 币的 logo 在链上 tokenURI(data:application/json;base64,{...,"image":"ipfs://…"}),
+ * 不在 Launched 事件里(普通币的 CoinCreated 才带 logoURI)。解析出 image,并把 ipfs:// 转成
+ * 网关 URL——前端 TokenLogo 直接把 src 交给 <img>、不转协议,所以必须存可直接加载的 https URL。
+ */
+function fastLogoFromTokenUri(tokenUri: unknown): string | null {
+  if (typeof tokenUri !== "string" || !tokenUri) return null;
+  const b64 = tokenUri.split("base64,")[1];
+  if (!b64) return null;
+  try {
+    const meta = JSON.parse(Buffer.from(b64, "base64").toString("utf8")) as { image?: unknown };
+    const img = meta.image;
+    if (!img || typeof img !== "string") return null;
+    return img.replace(/^ipfs:\/\/(?:ipfs\/)?/i, "https://ipfs.snowon.fun/ipfs/");
+  } catch {
+    return null;
+  }
+}
+
 export class EventHandlers {
   /** 同块多笔成交只打一次 eth_getBlockByNumber */
   private readonly blockTimeCache = new Map<string, Date>();
@@ -941,13 +960,16 @@ export class EventHandlers {
 
     let name = "Token";
     let symbol = "TKN";
+    let logoUri: string | null = null;
     try {
-      const [nm, sy] = await Promise.all([
+      const [nm, sy, uri] = await Promise.all([
         this.client.readContract({ address: token, abi: fastAbis.fastTokenAbi, functionName: "name" }).catch(() => "Token"),
         this.client.readContract({ address: token, abi: fastAbis.fastTokenAbi, functionName: "symbol" }).catch(() => "TKN"),
+        this.client.readContract({ address: token, abi: fastAbis.fastTokenAbi, functionName: "tokenURI" }).catch(() => ""),
       ]);
       name = String(nm || "Token");
       symbol = String(sy || "TKN");
+      logoUri = fastLogoFromTokenUri(uri);
     } catch (e) {
       console.error(`[fast] meta ${token}`, e);
     }
@@ -962,6 +984,7 @@ export class EventHandlers {
       feeReceiver: creator, // Launched 事件不带 feeReceiver,默认 creator
       name,
       symbol,
+      logoUri,
       quoteAsset: FAST_QUOTE,
       quoteDecimals: 18,
       buyTaxBps: Number(a.buyTaxBps ?? 0),
